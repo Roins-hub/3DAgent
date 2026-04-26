@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "concurrently -n api,web -c blue,green \"npm run dev:api\" \"npm run dev:web\"",
     "dev:web": "npm --workspace @3dagent/web run dev",
-    "dev:api": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Set-Location apps/api; if (Test-Path ../../.venv/Scripts/uvicorn.exe) { ../../.venv/Scripts/uvicorn.exe main:app --reload --port 8000 } else { python -m uvicorn main:app --reload --port 8000 }\"",
+    "dev:api": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Set-Location apps/api; if (Test-Path ../../.venv/Scripts/uvicorn.exe) { ../../.venv/Scripts/uvicorn.exe main:app --reload --port 8015 } else { python -m uvicorn main:app --reload --port 8015 }\"",
     "lint": "npm --workspace @3dagent/web run lint",
     "build": "npm --workspace @3dagent/web run build"
   },

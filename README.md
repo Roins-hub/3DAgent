@@ -1,4 +1,4 @@
-# 3D Agent Platform MVP
+﻿# 3D Agent Platform MVP
 
 A local MVP for a chat-driven AI 3D model generation platform. It includes a landing page, a professional generation studio, a Three.js preview surface, job history, export controls, and a FastAPI mock generation backend shaped for future Hunyuan3D-2 or TRELLIS integration.
 
@@ -27,10 +27,10 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r apps/api/requirements.txt
 cd apps/api
-uvicorn main:app --reload --port 8000
+uvicorn main:app --reload --port 8015
 ```
 
-The API runs at `http://localhost:8000`.
+The API runs at `http://localhost:8015`.
 
 ## Meshy API Setup
 
@@ -51,7 +51,7 @@ Restart the API after changing `.env`. In Meshy mode, `POST /api/jobs` submits a
 
 ## Tencent Cloud Hunyuan3D API Setup
 
-The Tencent Cloud Hunyuan3D API uses Tencent Cloud API 3.0 signing. It needs a `SecretId` and `SecretKey`, not a single `sk-*` key.
+The Tencent Cloud Hunyuan3D API uses Tencent Cloud API 3.0 signing. It needs a `SecretId` and `SecretKey`, not a single `sk-*` key. The default profile uses the domestic endpoint and Guangzhou region.
 
 Create `apps/api/.env`:
 
@@ -65,10 +65,23 @@ Then edit:
 MODEL_PROVIDER=hunyuan
 TENCENTCLOUD_SECRET_ID=your_tencentcloud_secret_id
 TENCENTCLOUD_SECRET_KEY=your_tencentcloud_secret_key
+TENCENTCLOUD_HUNYUAN_PROFILE=domestic
 TENCENTCLOUD_REGION=ap-guangzhou
 ```
 
 Restart the API after changing `.env`. In Hunyuan mode, `POST /api/jobs` submits a real text-to-3D job to Tencent Cloud and polls until a model URL is returned.
+
+## Image Generation Setup
+
+Image generation uses SiliconFlow by default. Create an API key in SiliconFlow, then add it to `apps/api/.env`.
+
+```text
+IMAGE_PROVIDER=siliconflow
+SILICONFLOW_API_KEY=your_siliconflow_api_key
+SILICONFLOW_IMAGE_MODEL=Qwen/Qwen-Image
+```
+
+In image mode, `POST /api/image-jobs` creates a text-to-image job and `/api/image-jobs/{id}/image` proxies the generated image.
 
 ## Environment
 
@@ -81,7 +94,7 @@ Copy-Item apps/web/.env.local.example apps/web/.env.local
 Default:
 
 ```text
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8015
 ```
 
 ## Verification
@@ -94,6 +107,7 @@ npm run build
 API smoke tests:
 
 ```powershell
-curl http://localhost:8000/api/health
-curl -X POST http://localhost:8000/api/jobs -H "Content-Type: application/json" -d "{\"prompt\":\"生成一把低多边形魔法剑\",\"mode\":\"text-to-3d\",\"quality\":\"balanced\",\"style\":\"game-ready\",\"targetFormat\":\"glb\"}"
+curl http://localhost:8015/api/health
+curl -X POST http://localhost:8015/api/jobs -H "Content-Type: application/json" -d "{\"prompt\":\"生成一个台灯\",\"mode\":\"text-to-3d\",\"quality\":\"balanced\",\"style\":\"game-ready\",\"targetFormat\":\"glb\"}"
+curl -X POST http://localhost:8015/api/image-jobs -H "Content-Type: application/json" -d "{\"prompt\":\"生成一张未来感工作台上的绿色玻璃台灯\",\"aspectRatio\":\"1:1\"}"
 ```

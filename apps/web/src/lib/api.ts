@@ -1,4 +1,9 @@
-import type { CreateJobRequest, GenerationJob } from "@3dagent/shared";
+import type {
+  CreateImageJobRequest,
+  CreateJobRequest,
+  GenerationJob,
+  ImageJob,
+} from "@3dagent/shared";
 
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
@@ -29,6 +34,14 @@ export const api = {
     }`,
   createJob: (payload: CreateJobRequest) =>
     request<GenerationJob>("/api/jobs", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  listImageJobs: () => request<ImageJob[]>("/api/image-jobs"),
+  getImageJob: (jobId: string) => request<ImageJob>(`/api/image-jobs/${jobId}`),
+  imageUrl: (jobId: string) => `${API_BASE_URL}/api/image-jobs/${jobId}/image`,
+  createImageJob: (payload: CreateImageJobRequest) =>
+    request<ImageJob>("/api/image-jobs", {
       method: "POST",
       body: JSON.stringify(payload),
     }),

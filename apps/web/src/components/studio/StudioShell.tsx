@@ -48,7 +48,11 @@ export function StudioShell() {
   }, [setJobs]);
 
   useEffect(() => {
-    if (!activeJob || activeJob.status === "completed" || activeJob.status === "failed") {
+    if (
+      !activeJob ||
+      activeJob.status === "completed" ||
+      activeJob.status === "failed"
+    ) {
       return;
     }
 
@@ -137,13 +141,16 @@ export function StudioShell() {
             <ArrowLeft size={19} />
           </Link>
           <div>
-            <p className="font-bold">Forma Agent 工作台</p>
+            <p className="font-bold">3D 模型工作台</p>
             <p className="text-xs text-[#656057]">
-              聊天生成、3D 预览、版本历史与模型导出
+              文本生成 3D、版本历史与模型导出
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Link href="/image">
+            <Button variant="secondary">打开图片生成</Button>
+          </Link>
           <StatusBadge status={activeJob?.status ?? "queued"} />
           <div className="relative z-50">
             <Button
@@ -164,11 +171,6 @@ export function StudioShell() {
                     disabled={format !== activeJob?.targetFormat}
                     key={format}
                     onClick={() => void exportModel(format)}
-                    title={
-                      format === activeJob?.targetFormat
-                        ? `导出 ${format.toUpperCase()}`
-                        : `当前任务没有生成 ${format.toUpperCase()} 文件`
-                    }
                   >
                     <span>{format.toUpperCase()}</span>
                     {format === activeJob?.targetFormat && (
@@ -190,7 +192,7 @@ export function StudioShell() {
             </span>
             <div>
               <h1 className="font-bold">生成对话</h1>
-              <p className="text-xs text-[#656057]">模拟后端接口</p>
+              <p className="text-xs text-[#656057]">文本驱动 3D 模型生成</p>
             </div>
           </div>
 
@@ -207,6 +209,9 @@ export function StudioShell() {
                     style={{ width: `${activeJob.progress}%` }}
                   />
                 </div>
+                {activeJob.error && (
+                  <p className="mt-2 text-xs text-red-700">{activeJob.error}</p>
+                )}
               </div>
             )}
           </div>
@@ -232,7 +237,7 @@ export function StudioShell() {
             <Button
               className="w-full"
               disabled={isSubmitting || prompt.trim().length === 0}
-              onClick={submitGeneration}
+              onClick={() => void submitGeneration()}
               aria-busy={isSubmitting}
             >
               <Send className={isSubmitting ? "animate-pulse" : undefined} size={16} />
@@ -253,7 +258,11 @@ export function StudioShell() {
                 选择任意版本，可恢复对应提示词和预览状态。
               </p>
             </div>
-            <Button variant="secondary" onClick={() => void submitGeneration()}>
+            <Button
+              variant="secondary"
+              disabled={prompt.trim().length === 0}
+              onClick={() => void submitGeneration()}
+            >
               <Play size={15} />
               再生成一次
             </Button>

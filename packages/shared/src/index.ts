@@ -11,6 +11,8 @@ export type TargetFormat = "glb" | "fbx" | "obj";
 
 export type GenerationQuality = "draft" | "balanced" | "production";
 
+export type ImageAspectRatio = "1:1" | "16:9" | "9:16" | "4:3" | "3:4";
+
 export interface CreateJobRequest {
   prompt: string;
   mode: GenerationMode;
@@ -38,4 +40,21 @@ export interface GenerationJob {
     polygonBudget: string;
     textureSet: string;
   };
+}
+
+export interface CreateImageJobRequest {
+  prompt: string;
+  aspectRatio: ImageAspectRatio;
+}
+
+export interface ImageJob {
+  id: string;
+  prompt: string;
+  status: JobStatus;
+  progress: number;
+  aspectRatio: ImageAspectRatio;
+  createdAt: string;
+  updatedAt: string;
+  imageUrl: string | null;
+  error: string | null;
 }

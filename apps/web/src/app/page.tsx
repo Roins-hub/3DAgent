@@ -1,28 +1,35 @@
-import { ArrowRight, Boxes, BrainCircuit, Download, Sparkles } from "lucide-react";
+import {
+  ArrowRight,
+  Boxes,
+  BrainCircuit,
+  Download,
+  Image as ImageIcon,
+  Sparkles,
+} from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 
-const steps = [
-  "描述模型需求",
-  "Agent 规划流程",
-  "生成网格与材质",
-  "预览、修改、导出",
+const workflows = [
+  "输入生成需求",
+  "选择 3D 或图片工作台",
+  "调用后端 API 生成结果",
+  "预览、复用历史、下载资产",
 ];
 
 const capabilities = [
   {
-    title: "聊天式生成",
-    body: "把一句粗略需求整理成可执行的 3D 生成任务。",
-    icon: BrainCircuit,
-  },
-  {
-    title: "实时 3D 预览",
-    body: "在浏览器里检查比例、轮廓、材质和导出状态。",
+    title: "3D 模型生成",
+    body: "通过腾讯云混元生 3D 国内站接口提交文本生成任务，并在浏览器里预览、导出模型。",
     icon: Boxes,
   },
   {
-    title: "面向生产流水线",
-    body: "接口预留给 Hunyuan3D、TRELLIS 和 Blender 后处理 worker。",
+    title: "免费图片生成",
+    body: "通过 Pollinations 免费文生图接口生成图片，后端代理图片流，避免浏览器跨域和重定向问题。",
+    icon: ImageIcon,
+  },
+  {
+    title: "任务历史与下载",
+    body: "模型和图片各自保留独立历史，方便回看提示词、恢复预览和下载生成资产。",
     icon: Download,
   },
 ];
@@ -40,66 +47,49 @@ export default function Home() {
         <nav className="hidden items-center gap-6 text-sm font-medium text-[#5b574f] md:flex">
           <a href="#workflow">流程</a>
           <a href="#capabilities">能力</a>
-          <Link href="/studio">工作台</Link>
+          <Link href="/studio">3D 工作台</Link>
+          <Link href="/image">图片生成</Link>
         </nav>
       </header>
 
-      <section className="mx-auto grid min-h-[calc(100vh-84px)] max-w-7xl items-center gap-10 px-5 pb-12 pt-4 lg:grid-cols-[0.88fr_1.12fr]">
-        <div className="max-w-[640px]">
+      <section className="mx-auto grid min-h-[calc(100vh-84px)] max-w-7xl items-center gap-10 px-5 pb-12 pt-4 lg:grid-cols-[0.9fr_1.1fr]">
+        <div className="max-w-[660px]">
           <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-black/10 bg-white/60 px-3 py-1 text-sm font-semibold text-[#20766f]">
             <span className="h-2 w-2 rounded-full bg-[#20766f]" />
-            AI 3D 模型生成工作台
+            AI 资产生成工作台
           </div>
           <h1 className="text-4xl font-semibold leading-[1.08] tracking-tight text-[#171817] sm:text-5xl lg:text-[56px] xl:text-[62px]">
-            <span className="block">用聊天生成项目级</span>
-            <span className="block">3D 模型资产</span>
+            <span className="block">用一句描述生成</span>
+            <span className="block">3D 模型与图片资产</span>
           </h1>
           <p className="mt-6 max-w-xl text-lg leading-8 text-[#5b574f]">
-            输入描述或参考图，Agent 会组织生成流程、展示任务状态，并在网页中预览、修改和导出模型。当前是本地 MVP，后续可替换为真实 GPU 生成服务。
+            Forma Agent 现在包含两个独立工作台：3D 模型生成用于创建可导出的
+            GLB 资产，图片生成用于快速产出概念图、参考图和视觉素材。
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Link href="/studio">
               <Button className="w-full sm:w-auto">
-                进入工作台 <ArrowRight size={17} />
+                打开 3D 工作台
+                <ArrowRight size={17} />
               </Button>
             </Link>
-            <a href="#workflow">
+            <Link href="/image">
               <Button variant="secondary" className="w-full sm:w-auto">
-                查看流程
+                <ImageIcon size={17} />
+                打开图片生成
               </Button>
-            </a>
+            </Link>
           </div>
         </div>
 
         <div className="surface relative overflow-hidden rounded-lg p-3">
-          <div className="dark-surface overflow-hidden rounded-lg">
-            <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-              <div>
-                <p className="text-sm font-semibold">工作台预览</p>
-                <p className="text-xs text-white/55">低多边形魔法剑</p>
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div className="dark-surface overflow-hidden rounded-lg">
+              <div className="border-b border-white/10 px-4 py-3">
+                <p className="text-sm font-semibold">3D 模型工作台</p>
+                <p className="text-xs text-white/55">文本到可导出模型</p>
               </div>
-              <span className="rounded-full bg-[#20766f] px-3 py-1 text-xs font-bold text-white">
-                84%
-              </span>
-            </div>
-            <div className="grid gap-0 md:grid-cols-[220px_1fr]">
-              <div className="border-b border-white/10 p-4 md:border-b-0 md:border-r">
-                <div className="mb-4 h-24 rounded-md bg-white/[0.06] p-3 text-xs leading-5 text-white/70">
-                  生成一把适合 Unity 的低多边形魔法剑，带琥珀色符文。
-                </div>
-                <div className="space-y-2">
-                  {["网格生成", "PBR 材质", "GLB 导出"].map((item) => (
-                    <div
-                      className="flex items-center justify-between rounded-md bg-white/[0.06] px-3 py-2 text-xs"
-                      key={item}
-                    >
-                      <span>{item}</span>
-                      <span className="text-[#9bc8c1]">就绪</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="relative min-h-[380px] p-5">
+              <div className="relative min-h-[360px] p-5">
                 <div className="absolute inset-5 rounded-lg border border-white/10 bg-[#151815]" />
                 <div className="absolute left-1/2 top-1/2 h-44 w-44 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[28px] border border-[#c77a2f]/50 bg-[#c77a2f]/20 shadow-2xl shadow-[#c77a2f]/20" />
                 <div className="absolute bottom-7 left-7 right-7 grid grid-cols-4 gap-2">
@@ -113,29 +103,36 @@ export default function Home() {
                 </div>
               </div>
             </div>
+
+            <div className="dark-surface overflow-hidden rounded-lg">
+              <div className="border-b border-white/10 px-4 py-3">
+                <p className="text-sm font-semibold">图片生成工作台</p>
+                <p className="text-xs text-white/55">免费文生图预览</p>
+              </div>
+              <div className="relative min-h-[360px] p-5">
+                <div className="absolute inset-5 rounded-lg border border-white/10 bg-[#101511]" />
+                <div className="absolute left-10 top-10 h-28 w-40 rounded-md bg-[#9bc8c1]/70 shadow-2xl shadow-[#9bc8c1]/20" />
+                <div className="absolute bottom-12 right-10 h-44 w-36 rounded-md bg-[#c77a2f]/70 shadow-2xl shadow-[#c77a2f]/20" />
+                <div className="absolute bottom-20 left-16 right-16 h-20 rounded-[50%] bg-white/10 blur-xl" />
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      <section
-        id="workflow"
-        className="mx-auto max-w-7xl px-5 py-16 md:py-20"
-      >
+      <section id="workflow" className="mx-auto max-w-7xl px-5 py-16 md:py-20">
         <div className="mb-8 flex items-end justify-between gap-6">
           <div>
             <p className="mb-2 text-sm font-bold uppercase text-[#20766f]">
               生成流程
             </p>
             <h2 className="text-3xl font-semibold tracking-tight">
-              从一句描述到可下载模型包。
+              从一句提示词到可下载资产。
             </h2>
           </div>
-          <Link href="/studio" className="hidden md:block">
-            <Button variant="dark">打开工作台</Button>
-          </Link>
         </div>
         <div className="grid gap-3 md:grid-cols-4">
-          {steps.map((step, index) => (
+          {workflows.map((step, index) => (
             <div className="surface rounded-lg p-5" key={step}>
               <p className="mb-8 text-sm font-bold text-[#c77a2f]">
                 0{index + 1}
@@ -146,10 +143,7 @@ export default function Home() {
         </div>
       </section>
 
-      <section
-        id="capabilities"
-        className="mx-auto max-w-7xl px-5 pb-20"
-      >
+      <section id="capabilities" className="mx-auto max-w-7xl px-5 pb-20">
         <div className="grid gap-4 md:grid-cols-3">
           {capabilities.map((item) => (
             <article className="surface rounded-lg p-6" key={item.title}>

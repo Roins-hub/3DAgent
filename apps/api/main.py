@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -21,12 +22,16 @@ GenerationMode = Literal["text-to-3d", "image-to-3d"]
 JobStatus = Literal["queued", "running", "postprocessing", "completed", "failed"]
 TargetFormat = Literal["glb", "fbx", "obj"]
 GenerationQuality = Literal["draft", "balanced", "production"]
+ImageAspectRatio = Literal["1:1", "16:9", "9:16", "4:3", "3:4"]
 
 MESHY_BASE_URL = "https://api.meshy.ai/openapi/v2/text-to-3d"
 TENCENT_AI3D_HOST = "ai3d.tencentcloudapi.com"
 TENCENT_AI3D_ENDPOINT = f"https://{TENCENT_AI3D_HOST}"
 TENCENT_AI3D_SERVICE = "ai3d"
 TENCENT_AI3D_VERSION = "2025-05-13"
+TENCENT_HUNYUAN_INTL_HOST = "hunyuan.intl.tencentcloudapi.com"
+TENCENT_HUNYUAN_INTL_SERVICE = "hunyuan"
+TENCENT_HUNYUAN_INTL_VERSION = "2023-09-01"
 
 
 def load_env_file(path: Path) -> None:
@@ -54,6 +59,11 @@ class CreateJobRequest(BaseModel):
     targetFormat: TargetFormat = "glb"
 
 
+class CreateImageJobRequest(BaseModel):
+    prompt: str = Field(max_length=1200)
+    aspectRatio: ImageAspectRatio = "1:1"
+
+
 class JobMetadata(BaseModel):
     engine: str
     polygonBudget: str
@@ -78,6 +88,27 @@ class GenerationJob(BaseModel):
     metadata: JobMetadata | None = None
 
 
+class ImageJob(BaseModel):
+    id: str
+    prompt: str
+    status: JobStatus
+    progress: int
+    aspectRatio: ImageAspectRatio
+    createdAt: str
+    updatedAt: str
+    imageUrl: str | None
+    error: str | None
+
+
+@dataclass(frozen=True)
+class TencentAi3dConfig:
+    host: str
+    endpoint: str
+    service: str
+    version: str
+    region: str
+
+
 app = FastAPI(title="3D Agent API", version="0.1.0")
 
 app.add_middleware(
@@ -90,6 +121,7 @@ app.add_middleware(
 )
 
 jobs: dict[str, GenerationJob] = {}
+image_jobs: dict[str, ImageJob] = {}
 DEMO_MODEL_PATH = ROOT_DIR / "apps" / "web" / "public" / "models" / "demo-asset.glb"
 
 
@@ -114,6 +146,10 @@ def selected_provider() -> str:
     return os.getenv("MODEL_PROVIDER", "mock").strip().lower()
 
 
+def selected_image_provider() -> str:
+    return os.getenv("IMAGE_PROVIDER", "siliconflow").strip().lower()
+
+
 def update_job(job_id: str, **updates: Any) -> GenerationJob | None:
     job = jobs.get(job_id)
     if job is None:
@@ -123,6 +159,21 @@ def update_job(job_id: str, **updates: Any) -> GenerationJob | None:
     job.updatedAt = now_iso()
     jobs[job_id] = job
     return job
+
+
+def update_image_job(job_id: str, **updates: Any) -> ImageJob | None:
+    job = image_jobs.get(job_id)
+    if job is None:
+        return None
+    for key, value in updates.items():
+        setattr(job, key, value)
+    job.updatedAt = now_iso()
+    image_jobs[job_id] = job
+    return job
+
+
+def sorted_image_jobs() -> list[ImageJob]:
+    return sorted(image_jobs.values(), key=lambda job: job.createdAt, reverse=True)
 
 
 def meshy_headers() -> dict[str, str]:
@@ -147,13 +198,40 @@ def tencent_credentials() -> tuple[str, str]:
     return secret_id, secret_key
 
 
+def tencent_ai3d_config() -> TencentAi3dConfig:
+    profile = os.getenv("TENCENTCLOUD_HUNYUAN_PROFILE", "domestic").strip().lower()
+    if profile in {"international", "intl", "global"}:
+        host = TENCENT_HUNYUAN_INTL_HOST
+        return TencentAi3dConfig(
+            host=host,
+            endpoint=f"https://{host}",
+            service=TENCENT_HUNYUAN_INTL_SERVICE,
+            version=TENCENT_HUNYUAN_INTL_VERSION,
+            region=os.getenv("TENCENTCLOUD_REGION", "ap-singapore").strip(),
+        )
+
+    if profile in {"domestic", "cn", "china"}:
+        host = TENCENT_AI3D_HOST
+        return TencentAi3dConfig(
+            host=host,
+            endpoint=f"https://{host}",
+            service=TENCENT_AI3D_SERVICE,
+            version=TENCENT_AI3D_VERSION,
+            region=os.getenv("TENCENTCLOUD_REGION", "ap-guangzhou").strip(),
+        )
+
+    raise RuntimeError(
+        "TENCENTCLOUD_HUNYUAN_PROFILE must be domestic or international."
+    )
+
+
 def sign_tencent(key: bytes, message: str) -> bytes:
     return hmac.new(key, message.encode("utf-8"), hashlib.sha256).digest()
 
 
 def call_tencent_ai3d(action: str, payload: dict[str, Any]) -> dict[str, Any]:
     secret_id, secret_key = tencent_credentials()
-    region = os.getenv("TENCENTCLOUD_REGION", "ap-guangzhou").strip()
+    config = tencent_ai3d_config()
     timestamp = int(time.time())
     date = datetime.fromtimestamp(timestamp, timezone.utc).strftime("%Y-%m-%d")
     body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
@@ -163,12 +241,12 @@ def call_tencent_ai3d(action: str, payload: dict[str, Any]) -> dict[str, Any]:
             "POST",
             "/",
             "",
-            f"content-type:application/json; charset=utf-8\nhost:{TENCENT_AI3D_HOST}\nx-tc-action:{action.lower()}\n",
+            f"content-type:application/json; charset=utf-8\nhost:{config.host}\nx-tc-action:{action.lower()}\n",
             "content-type;host;x-tc-action",
             hashlib.sha256(body.encode("utf-8")).hexdigest(),
         ]
     )
-    credential_scope = f"{date}/{TENCENT_AI3D_SERVICE}/tc3_request"
+    credential_scope = f"{date}/{config.service}/tc3_request"
     string_to_sign = "\n".join(
         [
             "TC3-HMAC-SHA256",
@@ -178,7 +256,7 @@ def call_tencent_ai3d(action: str, payload: dict[str, Any]) -> dict[str, Any]:
         ]
     )
     secret_date = sign_tencent(("TC3" + secret_key).encode("utf-8"), date)
-    secret_service = sign_tencent(secret_date, TENCENT_AI3D_SERVICE)
+    secret_service = sign_tencent(secret_date, config.service)
     secret_signing = sign_tencent(secret_service, "tc3_request")
     signature = hmac.new(
         secret_signing, string_to_sign.encode("utf-8"), hashlib.sha256
@@ -191,15 +269,15 @@ def call_tencent_ai3d(action: str, payload: dict[str, Any]) -> dict[str, Any]:
     )
 
     response = requests.post(
-        TENCENT_AI3D_ENDPOINT,
+        config.endpoint,
         headers={
             "Authorization": authorization,
             "Content-Type": "application/json; charset=utf-8",
-            "Host": TENCENT_AI3D_HOST,
+            "Host": config.host,
             "X-TC-Action": action,
             "X-TC-Timestamp": str(timestamp),
-            "X-TC-Version": TENCENT_AI3D_VERSION,
-            "X-TC-Region": region,
+            "X-TC-Version": config.version,
+            "X-TC-Region": config.region,
         },
         data=body.encode("utf-8"),
         timeout=60,
@@ -299,6 +377,92 @@ def model_url_from_meshy(task: dict[str, Any], target_format: TargetFormat) -> s
         or model_urls.get("obj")
         or model_urls.get("fbx")
     )
+
+
+def image_size_for_aspect_ratio(aspect_ratio: ImageAspectRatio) -> str:
+    return {
+        "1:1": "512x512",
+        "16:9": "1024x576",
+        "9:16": "576x1024",
+        "4:3": "1024x768",
+        "3:4": "768x1024",
+    }[aspect_ratio]
+
+
+def siliconflow_image_headers() -> dict[str, str]:
+    api_key = os.getenv("SILICONFLOW_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError(
+            "IMAGE_PROVIDER=siliconflow requires SILICONFLOW_API_KEY in .env."
+        )
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+
+def siliconflow_image_payload(
+    request: CreateImageJobRequest, seed: int | None = None
+) -> dict[str, Any]:
+    model = (
+        os.getenv("SILICONFLOW_IMAGE_MODEL", "Qwen/Qwen-Image")
+        .strip()
+        or "Qwen/Qwen-Image"
+    )
+    payload: dict[str, Any] = {
+        "model": model,
+        "prompt": request.prompt.strip(),
+        "image_size": image_size_for_aspect_ratio(request.aspectRatio),
+        "batch_size": 1,
+        "num_inference_steps": 20,
+        "guidance_scale": 7.5,
+        "output_format": "png",
+    }
+    if seed is not None:
+        payload["seed"] = seed
+    return payload
+
+
+def create_siliconflow_image(request: CreateImageJobRequest) -> str:
+    seed = int(time.time() * 1000) % 1_000_000_000
+    response = requests.post(
+        "https://api.siliconflow.cn/v1/images/generations",
+        headers=siliconflow_image_headers(),
+        json=siliconflow_image_payload(request, seed=seed),
+        timeout=120,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"SiliconFlow image generation failed: {response.text}")
+
+    data = response.json()
+    images = data.get("images") or data.get("data") or []
+    if not isinstance(images, list) or not images:
+        raise RuntimeError(
+            f"SiliconFlow image generation returned no images: {json.dumps(data, ensure_ascii=False)}"
+        )
+    first = images[0]
+    if not isinstance(first, dict) or not first.get("url"):
+        raise RuntimeError(
+            f"SiliconFlow image generation returned no image URL: {json.dumps(data, ensure_ascii=False)}"
+        )
+    return str(first["url"])
+
+
+async def run_siliconflow_image_generation(
+    job_id: str, request: CreateImageJobRequest
+) -> None:
+    try:
+        update_image_job(job_id, status="running", progress=35)
+        image_url = await asyncio.to_thread(create_siliconflow_image, request)
+        update_image_job(
+            job_id,
+            status="completed",
+            progress=100,
+            imageUrl=image_url,
+            error=None,
+        )
+    except Exception as exc:
+        update_image_job(job_id, status="failed", progress=0, error=str(exc))
 
 
 async def run_meshy_generation(job_id: str, request: CreateJobRequest) -> None:
@@ -468,6 +632,7 @@ async def health() -> dict[str, str]:
         "status": "ok",
         "service": "3d-agent-api",
         "provider": selected_provider(),
+        "imageProvider": selected_image_provider(),
     }
 
 
@@ -528,6 +693,82 @@ async def create_job(request: CreateJobRequest) -> GenerationJob:
 @app.get("/api/jobs", response_model=list[GenerationJob])
 async def list_jobs() -> list[GenerationJob]:
     return sorted_jobs()[:20]
+
+
+@app.post("/api/image-jobs", response_model=ImageJob)
+async def create_image_job(request: CreateImageJobRequest) -> ImageJob:
+    prompt = request.prompt.strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Prompt is required.")
+
+    provider = selected_image_provider()
+    if provider not in {"siliconflow", "mock"}:
+        raise HTTPException(
+            status_code=400,
+            detail="IMAGE_PROVIDER must be siliconflow or mock.",
+        )
+    if provider == "siliconflow" and not os.getenv("SILICONFLOW_API_KEY", "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="IMAGE_PROVIDER=siliconflow requires SILICONFLOW_API_KEY in .env.",
+        )
+
+    timestamp = now_iso()
+    job = ImageJob(
+        id=str(uuid4()),
+        prompt=prompt,
+        status="queued",
+        progress=0,
+        aspectRatio=request.aspectRatio,
+        createdAt=timestamp,
+        updatedAt=timestamp,
+        imageUrl=None,
+        error=None,
+    )
+    image_jobs[job.id] = job
+
+    asyncio.create_task(run_siliconflow_image_generation(job.id, request))
+    return job
+
+
+@app.get("/api/image-jobs", response_model=list[ImageJob])
+async def list_image_jobs() -> list[ImageJob]:
+    return sorted_image_jobs()[:20]
+
+
+@app.get("/api/image-jobs/{job_id}", response_model=ImageJob)
+async def get_image_job(job_id: str) -> ImageJob:
+    job = image_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Image job not found.")
+    return job
+
+
+@app.get("/api/image-jobs/{job_id}/image")
+async def get_image_job_image(job_id: str):
+    job = image_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Image job not found.")
+    if job.status != "completed" or not job.imageUrl:
+        raise HTTPException(status_code=409, detail="Image is not ready yet.")
+    try:
+        response = requests.get(job.imageUrl, stream=True, timeout=120)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not fetch generated image: {exc}",
+        ) from exc
+
+    content_type = response.headers.get("content-type") or "image/png"
+    return StreamingResponse(
+        stream_remote_response(response),
+        media_type=content_type,
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": f'inline; filename="{job.id}.png"',
+        },
+    )
 
 
 @app.get("/api/jobs/{job_id}/model")
