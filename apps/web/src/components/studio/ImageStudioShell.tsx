@@ -158,6 +158,7 @@ export function ImageStudioShell() {
   }
 
   const canDownload = activeJob?.status === "completed";
+  const hasFailed = activeJob?.status === "failed";
   const previewUrl =
     activeJob && preview?.jobId === activeJob.id ? preview.url : null;
   const isPreviewLoading = Boolean(canDownload && !previewUrl && !error);
@@ -176,7 +177,7 @@ export function ImageStudioShell() {
           <div>
             <p className="font-bold">图片生成工作台</p>
             <p className="text-xs text-[#656057]">
-              免费 Pollinations 文生图、预览与下载
+              SiliconFlow 文生图、预览与下载
             </p>
           </div>
         </div>
@@ -290,18 +291,28 @@ export function ImageStudioShell() {
                     <p className="text-lg font-bold">
                       {isPreviewLoading
                         ? "图片正在加载"
-                        : activeJob
+                        : hasFailed
+                          ? "图片生成失败"
+                          : activeJob
                           ? "图片正在生成"
                           : "等待图片提示词"}
                     </p>
                     <p className="mt-2 text-sm leading-6 text-white/62">
-                      完成后，生成图会在这里完整预览。
+                      {hasFailed
+                        ? activeJob?.error || "请调整提示词或稍后重试。"
+                        : "完成后，生成图会在这里完整预览。"}
                     </p>
                   </div>
                 </div>
               )}
               <div className="absolute right-4 top-4 z-20 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold text-white/85">
-                {previewUrl ? "图片预览" : activeJob ? "正在生成" : "就绪"}
+                {previewUrl
+                  ? "图片预览"
+                  : hasFailed
+                    ? "失败"
+                    : activeJob
+                      ? "正在生成"
+                      : "就绪"}
               </div>
             </div>
           </div>

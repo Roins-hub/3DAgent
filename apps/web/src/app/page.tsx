@@ -23,8 +23,8 @@ const capabilities = [
     icon: Boxes,
   },
   {
-    title: "免费图片生成",
-    body: "通过 Pollinations 免费文生图接口生成图片，后端代理图片流，避免浏览器跨域和重定向问题。",
+    title: "图片生成",
+    body: "通过 SiliconFlow 文生图接口生成图片，后端代理图片流，避免浏览器跨域和重定向问题。",
     icon: ImageIcon,
   },
   {

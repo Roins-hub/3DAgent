@@ -106,10 +106,10 @@ MODEL_PROVIDER=mock
 
 ## 图片生成配置
 
-图片生成使用 SiliconFlow API。当前已验证可用的模型是：
+图片生成使用 SiliconFlow API。当前默认模型是：
 
 ```text
-Qwen/Qwen-Image
+Kwai-Kolors/Kolors
 ```
 
 在 `apps/api/.env` 中填写：
@@ -117,7 +117,7 @@ Qwen/Qwen-Image
 ```text
 IMAGE_PROVIDER=siliconflow
 SILICONFLOW_API_KEY=your_siliconflow_api_key
-SILICONFLOW_IMAGE_MODEL=Qwen/Qwen-Image
+SILICONFLOW_IMAGE_MODEL=Kwai-Kolors/Kolors
 ```
 
 图片生成页面只保留真正有作用的输入：

@@ -80,6 +80,24 @@ class ImageProviderTests(unittest.TestCase):
         self.assertEqual(payload["seed"], 42)
         self.assertEqual(payload["output_format"], "png")
 
+    def test_siliconflow_payload_defaults_to_kolors(self):
+        with test_env(
+            {
+                "IMAGE_PROVIDER": "siliconflow",
+                "SILICONFLOW_API_KEY": "test-key",
+                "SILICONFLOW_IMAGE_MODEL": "",
+            }
+        ):
+            api = load_api()
+            request = api.CreateImageJobRequest(
+                prompt="生成一只狗",
+                aspectRatio="1:1",
+            )
+
+            payload = api.siliconflow_image_payload(request)
+
+        self.assertEqual(payload["model"], "Kwai-Kolors/Kolors")
+
 
 if __name__ == "__main__":
     unittest.main()

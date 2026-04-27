@@ -148,9 +148,6 @@ export function StudioShell() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Link href="/image">
-            <Button variant="secondary">打开图片生成</Button>
-          </Link>
           <StatusBadge status={activeJob?.status ?? "queued"} />
           <div className="relative z-50">
             <Button

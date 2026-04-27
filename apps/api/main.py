@@ -32,6 +32,8 @@ TENCENT_AI3D_VERSION = "2025-05-13"
 TENCENT_HUNYUAN_INTL_HOST = "hunyuan.intl.tencentcloudapi.com"
 TENCENT_HUNYUAN_INTL_SERVICE = "hunyuan"
 TENCENT_HUNYUAN_INTL_VERSION = "2023-09-01"
+SILICONFLOW_DEFAULT_IMAGE_MODEL = "Kwai-Kolors/Kolors"
+SILICONFLOW_IMAGE_TIMEOUT_SECONDS = 180
 
 
 def load_env_file(path: Path) -> None:
@@ -405,9 +407,9 @@ def siliconflow_image_payload(
     request: CreateImageJobRequest, seed: int | None = None
 ) -> dict[str, Any]:
     model = (
-        os.getenv("SILICONFLOW_IMAGE_MODEL", "Qwen/Qwen-Image")
+        os.getenv("SILICONFLOW_IMAGE_MODEL", SILICONFLOW_DEFAULT_IMAGE_MODEL)
         .strip()
-        or "Qwen/Qwen-Image"
+        or SILICONFLOW_DEFAULT_IMAGE_MODEL
     )
     payload: dict[str, Any] = {
         "model": model,
@@ -425,14 +427,33 @@ def siliconflow_image_payload(
 
 def create_siliconflow_image(request: CreateImageJobRequest) -> str:
     seed = int(time.time() * 1000) % 1_000_000_000
-    response = requests.post(
-        "https://api.siliconflow.cn/v1/images/generations",
-        headers=siliconflow_image_headers(),
-        json=siliconflow_image_payload(request, seed=seed),
-        timeout=120,
-    )
+    try:
+        response = requests.post(
+            "https://api.siliconflow.cn/v1/images/generations",
+            headers=siliconflow_image_headers(),
+            json=siliconflow_image_payload(request, seed=seed),
+            timeout=SILICONFLOW_IMAGE_TIMEOUT_SECONDS,
+        )
+    except requests.Timeout as exc:
+        raise RuntimeError(
+            "SiliconFlow 图片生成超时：当前模型排队或响应过慢，请稍后重试，"
+            "或在 .env 中切换 SILICONFLOW_IMAGE_MODEL。"
+        ) from exc
+    except requests.RequestException as exc:
+        raise RuntimeError(f"SiliconFlow 图片生成请求失败：{exc}") from exc
     if response.status_code >= 400:
-        raise RuntimeError(f"SiliconFlow image generation failed: {response.text}")
+        try:
+            error_payload = response.json()
+            error_message = (
+                error_payload.get("message")
+                or error_payload.get("error")
+                or response.text
+            )
+        except ValueError:
+            error_message = response.text
+        raise RuntimeError(
+            f"SiliconFlow 图片生成失败：HTTP {response.status_code} {error_message}"
+        )
 
     data = response.json()
     images = data.get("images") or data.get("data") or []
