@@ -3,6 +3,7 @@ import type {
   CreateJobRequest,
   GenerationJob,
   ImageJob,
+  JobStatus,
 } from "@3dagent/shared";
 import { getAuthHeaders } from "@/lib/supabase";
 
@@ -29,6 +30,67 @@ export interface HelpChatRequest {
 
 export interface HelpChatResponse {
   message: string;
+}
+
+export interface AdminSummary {
+  totalUsers: number;
+  totalJobs: number;
+  modelJobs: number;
+  imageJobs: number;
+  failedJobs: number;
+  runningJobs: number;
+  completedJobs: number;
+  recentJobs: AdminGenerationJob[];
+}
+
+export interface AdminUser {
+  id: string;
+  email: string | null;
+  username: string | null;
+  createdAt: string | null;
+  lastSignInAt: string | null;
+  isBanned: boolean;
+}
+
+export interface AdminGenerationJob {
+  id: string;
+  userId: string;
+  kind: "3d" | "image";
+  prompt: string;
+  mode: string | null;
+  status: JobStatus;
+  progress: number;
+  quality: string | null;
+  style: string | null;
+  targetFormat: string | null;
+  aspectRatio: string | null;
+  resultUrl: string | null;
+  thumbnailUrl: string | null;
+  error: string | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+  deletedBy: string | null;
+}
+
+export interface AdminSetting {
+  key: string;
+  value: string | null;
+  isSecret: boolean;
+  isConfigured: boolean;
+  updatedAt: string | null;
+}
+
+export interface AdminAuditLog {
+  id: string | null;
+  adminId: string | null;
+  adminEmail: string | null;
+  action: string;
+  targetType: string;
+  targetId: string | null;
+  summary: string | null;
+  createdAt: string | null;
 }
 
 export interface CadamGenerateRequest {
@@ -99,6 +161,49 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  adminSummary: () => request<AdminSummary>("/api/admin/summary"),
+  adminUsers: () => request<{ users: AdminUser[] }>("/api/admin/users"),
+  adminUserAction: (userId: string, action: "disable" | "restore") =>
+    request<AdminUser>(`/api/admin/users/${userId}/action`, {
+      method: "POST",
+      body: JSON.stringify({ action }),
+    }),
+  adminDeleteUser: (userId: string) =>
+    request<{ ok: boolean }>(`/api/admin/users/${userId}`, {
+      method: "DELETE",
+    }),
+  adminJobs: (params?: {
+    kind?: string;
+    status?: string;
+    search?: string;
+    includeDeleted?: boolean;
+  }) => {
+    const query = new URLSearchParams();
+    if (params?.kind) query.set("kind", params.kind);
+    if (params?.status) query.set("status", params.status);
+    if (params?.search) query.set("search", params.search);
+    if (params?.includeDeleted) query.set("includeDeleted", "true");
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request<{ jobs: AdminGenerationJob[] }>(`/api/admin/generation-jobs${suffix}`);
+  },
+  adminJobAction: (jobId: string, action: "soft_delete" | "restore" | "retry") =>
+    request<{ job: AdminGenerationJob }>(`/api/admin/generation-jobs/${jobId}/action`, {
+      method: "POST",
+      body: JSON.stringify({ action }),
+    }),
+  adminDeleteJob: (jobId: string) =>
+    request<{ ok: boolean }>(`/api/admin/generation-jobs/${jobId}`, {
+      method: "DELETE",
+    }),
+  adminSettings: () => request<{ settings: AdminSetting[] }>("/api/admin/settings"),
+  adminUpdateSettings: (
+    settings: { key: string; value: string | null; isSecret: boolean }[],
+  ) =>
+    request<{ settings: AdminSetting[] }>("/api/admin/settings", {
+      method: "PUT",
+      body: JSON.stringify({ settings }),
+    }),
+  adminAuditLogs: () => request<{ logs: AdminAuditLog[] }>("/api/admin/audit-logs"),
   helpChatStream: async (payload: HelpChatRequest, options: HelpChatStreamOptions) => {
     const authHeaders = await getAuthHeaders();
     const response = await fetch(`${API_BASE_URL}/api/help-chat/stream`, {

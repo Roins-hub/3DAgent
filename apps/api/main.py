@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import quote
 from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException
@@ -46,6 +47,30 @@ NEURAL4D_DEFAULT_BASE_URL = "https://alb.neural4d.com:3000/api"
 NEURAL4D_POLL_SECONDS = 8
 SUPABASE_REQUEST_RETRIES = 2
 SUPABASE_AUTH_CACHE_SECONDS = 60
+ADMIN_SETTINGS_CACHE_SECONDS = 30
+ADMIN_SECRET_KEYS = {
+    "MESHY_API_KEY",
+    "NEURAL4D_API_TOKEN",
+    "TENCENTCLOUD_SECRET_ID",
+    "TENCENTCLOUD_SECRET_KEY",
+    "SILICONFLOW_API_KEY",
+    "OPENAI_API_KEY",
+    "CADAM_OPENAI_API_KEY",
+    "MIMO_API_KEY",
+}
+ADMIN_VISIBLE_SETTING_KEYS = [
+    "MODEL_PROVIDER",
+    "IMAGE_PROVIDER",
+    "CADAM_LLM_PROVIDER",
+    "OPENAI_IMAGE_MODEL",
+    "SILICONFLOW_IMAGE_MODEL",
+    "MIMO_CHAT_MODEL",
+    "OPENAI_API_KEY",
+    "SILICONFLOW_API_KEY",
+    "MIMO_API_KEY",
+    "TENCENTCLOUD_SECRET_ID",
+    "TENCENTCLOUD_SECRET_KEY",
+]
 
 
 def load_env_file(path: Path) -> None:
@@ -61,8 +86,9 @@ def load_env_file(path: Path) -> None:
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
+API_ENV_PATH = Path(__file__).resolve().parent / ".env"
 load_env_file(ROOT_DIR / ".env")
-load_env_file(Path(__file__).resolve().parent / ".env")
+load_env_file(API_ENV_PATH)
 
 
 class CreateJobRequest(BaseModel):
@@ -120,6 +146,71 @@ class AuthUser(BaseModel):
     username: str | None = None
 
 
+class AdminSummary(BaseModel):
+    totalUsers: int
+    totalJobs: int
+    modelJobs: int
+    imageJobs: int
+    failedJobs: int
+    runningJobs: int
+    completedJobs: int
+    recentJobs: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AdminUser(BaseModel):
+    id: str
+    email: str | None = None
+    username: str | None = None
+    createdAt: str | None = None
+    lastSignInAt: str | None = None
+    isBanned: bool = False
+
+
+class AdminUsersResponse(BaseModel):
+    users: list[AdminUser]
+
+
+class AdminUserAction(BaseModel):
+    action: Literal["disable", "restore"]
+
+
+class AdminGenerationJobAction(BaseModel):
+    action: Literal["soft_delete", "restore", "retry"]
+
+
+class AdminSettingInput(BaseModel):
+    key: str = Field(min_length=1, max_length=120)
+    value: str | None = Field(default=None, max_length=4000)
+    isSecret: bool = False
+
+
+class AdminSettingView(BaseModel):
+    key: str
+    value: str | None = None
+    isSecret: bool = False
+    isConfigured: bool = False
+    updatedAt: str | None = None
+
+
+class AdminSettingsUpdate(BaseModel):
+    settings: list[AdminSettingInput] = Field(default_factory=list, max_length=80)
+
+
+class AdminSettingsResponse(BaseModel):
+    settings: list[AdminSettingView]
+
+
+class AdminAuditLog(BaseModel):
+    id: str | None = None
+    adminId: str | None = None
+    adminEmail: str | None = None
+    action: str
+    targetType: str
+    targetId: str | None = None
+    summary: str | None = None
+    createdAt: str | None = None
+
+
 class HelpChatMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str = Field(max_length=4000)
@@ -174,6 +265,7 @@ jobs: dict[str, GenerationJob] = {}
 image_jobs: dict[str, ImageJob] = {}
 job_contexts: dict[str, dict[str, str]] = {}
 auth_user_cache: dict[str, tuple[float, AuthUser]] = {}
+admin_settings_cache: tuple[float, dict[str, dict[str, Any]]] | None = None
 DEMO_MODEL_PATH = ROOT_DIR / "apps" / "web" / "public" / "models" / "demo-asset.glb"
 MODEL_CACHE_DIR = ROOT_DIR / ".cache" / "models"
 IMAGE_CACHE_DIR = ROOT_DIR / ".cache" / "images"
@@ -318,16 +410,16 @@ def download_remote_model(source_url: str, target_path: Path) -> None:
 
 
 def selected_provider() -> str:
-    return os.getenv("MODEL_PROVIDER", "mock").strip().lower()
+    return runtime_setting_value("MODEL_PROVIDER", "mock").strip().lower()
 
 
 def selected_image_provider() -> str:
-    return os.getenv("IMAGE_PROVIDER", "siliconflow").strip().lower()
+    return runtime_setting_value("IMAGE_PROVIDER", "siliconflow").strip().lower()
 
 
 def mimo_base_url() -> str:
     return (
-        os.getenv("MIMO_BASE_URL", "https://api.xiaomimimo.com/v1")
+        runtime_setting_value("MIMO_BASE_URL", "https://api.xiaomimimo.com/v1")
         .strip()
         .rstrip(";")
         .rstrip("/")
@@ -335,27 +427,30 @@ def mimo_base_url() -> str:
 
 
 def mimo_chat_model() -> str:
-    return os.getenv("MIMO_CHAT_MODEL", "mimo-v2.5-pro").strip() or "mimo-v2.5-pro"
+    return runtime_setting_value("MIMO_CHAT_MODEL", "mimo-v2.5-pro").strip() or "mimo-v2.5-pro"
 
 
 def cadam_chat_model() -> str:
-    return os.getenv("CADAM_CHAT_MODEL", mimo_chat_model()).strip() or mimo_chat_model()
+    return runtime_setting_value("CADAM_CHAT_MODEL", mimo_chat_model()).strip() or mimo_chat_model()
 
 
 def cadam_llm_provider() -> str:
-    return os.getenv("CADAM_LLM_PROVIDER", "mimo").strip().lower() or "mimo"
+    return runtime_setting_value("CADAM_LLM_PROVIDER", "mimo").strip().lower() or "mimo"
 
 
 def cadam_openai_base_url() -> str:
     return (
-        os.getenv("CADAM_OPENAI_BASE_URL", os.getenv("OPENAI_IMAGE_BASE_URL", "https://api.openai.com/v1"))
+        runtime_setting_value(
+            "CADAM_OPENAI_BASE_URL",
+            runtime_setting_value("OPENAI_IMAGE_BASE_URL", "https://api.openai.com/v1"),
+        )
         .strip()
         .rstrip("/")
     )
 
 
 def cadam_openai_model() -> str:
-    return os.getenv("CADAM_OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+    return runtime_setting_value("CADAM_OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
 
 
 def is_mimo_vision_model(model: str) -> bool:
@@ -513,7 +608,7 @@ def build_mimo_help_chat_payload(request: HelpChatRequest) -> dict[str, Any]:
 
 
 def mimo_headers() -> dict[str, str]:
-    api_key = os.getenv("MIMO_API_KEY", "").strip()
+    api_key = env_or_runtime_secret("MIMO_API_KEY")
     if not api_key:
         raise HTTPException(status_code=503, detail="MiMo API key is not configured.")
     return {
@@ -773,7 +868,7 @@ def call_mimo_cadam_generation(request: CadamGenerateRequest) -> CadamGenerateRe
 
 
 def openai_chat_headers() -> dict[str, str]:
-    api_key = os.getenv("CADAM_OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", "")).strip()
+    api_key = env_or_runtime_secret("CADAM_OPENAI_API_KEY") or env_or_runtime_secret("OPENAI_API_KEY")
     if not api_key:
         raise HTTPException(status_code=503, detail="CADAM OpenAI-compatible API key is not configured.")
     return {
@@ -921,9 +1016,24 @@ def supabase_auth_config() -> tuple[str, str]:
     return supabase_url, publishable_key
 
 
+def supabase_service_role_key() -> str:
+    service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    if not service_role_key:
+        raise HTTPException(status_code=503, detail="Supabase service role key is not configured.")
+    return service_role_key
+
+
 def supabase_rest_url(path: str) -> str:
     supabase_url, _ = supabase_auth_config()
     return f"{supabase_url}/rest/v1/{path.lstrip('/')}"
+
+
+def supabase_admin_url(path: str) -> str:
+    supabase_url, _ = supabase_auth_config()
+    path = path.lstrip("/")
+    if path.startswith("auth/"):
+        return f"{supabase_url}/{path}"
+    return f"{supabase_url}/rest/v1/{path}"
 
 
 def supabase_headers(authorization: str, *, prefer: str | None = None) -> dict[str, str]:
@@ -931,6 +1041,18 @@ def supabase_headers(authorization: str, *, prefer: str | None = None) -> dict[s
     headers = {
         "apikey": publishable_key,
         "Authorization": authorization,
+        "Content-Type": "application/json",
+    }
+    if prefer:
+        headers["Prefer"] = prefer
+    return headers
+
+
+def supabase_admin_headers(*, prefer: str | None = None) -> dict[str, str]:
+    service_role_key = supabase_service_role_key()
+    headers = {
+        "apikey": service_role_key,
+        "Authorization": f"Bearer {service_role_key}",
         "Content-Type": "application/json",
     }
     if prefer:
@@ -951,6 +1073,27 @@ def supabase_request(request_func: Any, *args: Any, **kwargs: Any) -> requests.R
 
     assert last_error is not None
     raise last_error
+
+
+def supabase_admin_request(
+    method: str,
+    path: str,
+    *,
+    json_body: Any | None = None,
+    prefer: str | None = None,
+    timeout: int = 20,
+) -> requests.Response:
+    request_func = getattr(requests, method.lower())
+    kwargs: dict[str, Any] = {
+        "headers": supabase_admin_headers(prefer=prefer),
+        "timeout": timeout,
+    }
+    if json_body is not None:
+        kwargs["data"] = json.dumps(json_body)
+    response = supabase_request(request_func, supabase_admin_url(path), **kwargs)
+    if not response.ok:
+        raise_supabase_error(response)
+    return response
 
 
 def verify_supabase_user(authorization: str | None) -> AuthUser:
@@ -992,6 +1135,62 @@ def verify_supabase_user(authorization: str | None) -> AuthUser:
     )
     cache_auth_user(authorization, user)
     return user
+
+
+def admin_email_allowlist() -> set[str]:
+    raw_value = os.getenv("ADMIN_EMAIL_ALLOWLIST", "")
+    return {
+        email.strip().lower()
+        for email in raw_value.replace(";", ",").split(",")
+        if email.strip()
+    }
+
+
+def verify_admin_user(authorization: str | None) -> AuthUser:
+    user = verify_supabase_user(authorization)
+    if not user.email or user.email.lower() not in admin_email_allowlist():
+        raise HTTPException(status_code=403, detail="Admin access is not allowed for this account.")
+    return user
+
+
+def runtime_settings_map() -> dict[str, dict[str, Any]]:
+    global admin_settings_cache
+    now = time.monotonic()
+    if admin_settings_cache and admin_settings_cache[0] > now:
+        return admin_settings_cache[1]
+    try:
+        response = supabase_admin_request(
+            "GET",
+            "admin_settings?select=key,value,is_secret,updated_at",
+            timeout=10,
+        )
+    except Exception:
+        return {}
+    data = response.json()
+    settings = {
+        row["key"]: row
+        for row in data
+        if isinstance(row, dict) and isinstance(row.get("key"), str)
+    }
+    admin_settings_cache = (now + ADMIN_SETTINGS_CACHE_SECONDS, settings)
+    return settings
+
+
+def clear_runtime_settings_cache() -> None:
+    global admin_settings_cache
+    admin_settings_cache = None
+
+
+def runtime_setting_value(key: str, default: str = "") -> str:
+    row = runtime_settings_map().get(key)
+    value = row.get("value") if row else None
+    if isinstance(value, str) and value:
+        return value
+    return os.getenv(key, default)
+
+
+def env_or_runtime_secret(key: str) -> str:
+    return runtime_setting_value(key, "").strip()
 
 
 def generation_job_to_history_row(job: GenerationJob, user_id: str) -> dict[str, Any]:
@@ -1141,6 +1340,159 @@ def get_history_row(job_id: str, kind: str, authorization: str) -> dict[str, Any
     return data[0]
 
 
+def get_admin_history_row(job_id: str) -> dict[str, Any] | None:
+    response = supabase_admin_request(
+        "GET",
+        f"generation_jobs?id=eq.{quote(job_id)}&select=*&limit=1",
+    )
+    data = response.json()
+    if not isinstance(data, list) or not data:
+        return None
+    return data[0]
+
+
+def admin_list_generation_rows(
+    *,
+    kind: str | None = None,
+    status: str | None = None,
+    search: str | None = None,
+    include_deleted: bool = False,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    filters = ["select=*", "order=created_at.desc", f"limit={max(1, min(limit, 500))}"]
+    if kind and kind in {"3d", "image"}:
+        filters.append(f"kind=eq.{kind}")
+    if status:
+        filters.append(f"status=eq.{quote(status)}")
+    if search:
+        filters.append(f"prompt=ilike.*{quote(search)}*")
+    if not include_deleted:
+        filters.append("deleted_at=is.null")
+    response = supabase_admin_request("GET", f"generation_jobs?{'&'.join(filters)}")
+    data = response.json()
+    return data if isinstance(data, list) else []
+
+
+def admin_job_response(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row.get("id"),
+        "userId": row.get("user_id"),
+        "kind": row.get("kind"),
+        "prompt": row.get("prompt"),
+        "mode": row.get("mode"),
+        "status": row.get("status"),
+        "progress": row.get("progress"),
+        "quality": row.get("quality"),
+        "style": row.get("style"),
+        "targetFormat": row.get("target_format"),
+        "aspectRatio": row.get("aspect_ratio"),
+        "resultUrl": row.get("result_url"),
+        "thumbnailUrl": row.get("thumbnail_url"),
+        "error": row.get("error"),
+        "metadata": row.get("metadata"),
+        "createdAt": row.get("created_at"),
+        "updatedAt": row.get("updated_at"),
+        "deletedAt": row.get("deleted_at"),
+        "deletedBy": row.get("deleted_by"),
+    }
+
+
+def admin_user_from_payload(payload: dict[str, Any]) -> AdminUser:
+    metadata = payload.get("user_metadata") or {}
+    username = metadata.get("username")
+    banned_until = payload.get("banned_until")
+    return AdminUser(
+        id=str(payload.get("id") or ""),
+        email=payload.get("email"),
+        username=username if isinstance(username, str) else None,
+        createdAt=payload.get("created_at"),
+        lastSignInAt=payload.get("last_sign_in_at"),
+        isBanned=bool(banned_until),
+    )
+
+
+def admin_setting_view(row: dict[str, Any]) -> AdminSettingView:
+    is_secret = bool(row.get("is_secret"))
+    value = row.get("value")
+    return AdminSettingView(
+        key=str(row.get("key") or ""),
+        value=value if isinstance(value, str) else None,
+        isSecret=is_secret,
+        isConfigured=bool(value),
+        updatedAt=row.get("updated_at"),
+    )
+
+
+def merge_settings_with_environment(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_key = {
+        str(row.get("key")): dict(row)
+        for row in rows
+        if isinstance(row, dict) and row.get("key")
+    }
+    for key in ADMIN_VISIBLE_SETTING_KEYS:
+        env_value = os.getenv(key, "")
+        row = by_key.get(key)
+        if row is None:
+            by_key[key] = {
+                "key": key,
+                "value": env_value,
+                "is_secret": key in ADMIN_SECRET_KEYS,
+                "updated_at": None,
+            }
+        elif not row.get("value") and env_value:
+            row["value"] = env_value
+    return [by_key[key] for key in ADMIN_VISIBLE_SETTING_KEYS if key in by_key] + [
+        row for key, row in sorted(by_key.items()) if key not in ADMIN_VISIBLE_SETTING_KEYS
+    ]
+
+
+def update_local_env_file(updates: dict[str, str]) -> None:
+    API_ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+    existing_lines = API_ENV_PATH.read_text(encoding="utf-8-sig").splitlines() if API_ENV_PATH.exists() else []
+    pending = dict(updates)
+    next_lines: list[str] = []
+    for line in existing_lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in line:
+            next_lines.append(line)
+            continue
+        key, _ = line.split("=", 1)
+        clean_key = key.strip()
+        if clean_key in pending:
+            next_lines.append(f"{clean_key}={pending.pop(clean_key)}")
+        else:
+            next_lines.append(line)
+    for key, value in pending.items():
+        next_lines.append(f"{key}={value}")
+    API_ENV_PATH.write_text("\n".join(next_lines).rstrip() + "\n", encoding="utf-8")
+    for key, value in updates.items():
+        os.environ[key] = value
+
+
+def write_audit_log(
+    admin: AuthUser,
+    action: str,
+    target_type: str,
+    *,
+    target_id: str | None = None,
+    summary: str | None = None,
+) -> None:
+    payload = {
+        "admin_id": admin.id,
+        "admin_email": admin.email,
+        "action": action,
+        "target_type": target_type,
+        "target_id": target_id,
+        "summary": summary,
+    }
+    supabase_admin_request(
+        "POST",
+        "admin_audit_logs",
+        json_body=payload,
+        prefer="return=minimal",
+    )
+
+
 def register_job_context(job_id: str, user: AuthUser, authorization: str) -> None:
     job_contexts[job_id] = {"user_id": user.id, "authorization": authorization}
 
@@ -1220,7 +1572,7 @@ def sorted_image_jobs() -> list[ImageJob]:
 
 
 def meshy_headers() -> dict[str, str]:
-    api_key = os.getenv("MESHY_API_KEY", "").strip()
+    api_key = env_or_runtime_secret("MESHY_API_KEY")
     if not api_key:
         raise RuntimeError("MESHY_API_KEY is not configured.")
     return {
@@ -1232,13 +1584,13 @@ def meshy_headers() -> dict[str, str]:
 
 def neural4d_base_url() -> str:
     return (
-        os.getenv("NEURAL4D_BASE_URL", NEURAL4D_DEFAULT_BASE_URL).strip().rstrip("/")
+        runtime_setting_value("NEURAL4D_BASE_URL", NEURAL4D_DEFAULT_BASE_URL).strip().rstrip("/")
         or NEURAL4D_DEFAULT_BASE_URL
     )
 
 
 def neural4d_headers() -> dict[str, str]:
-    token = os.getenv("NEURAL4D_API_TOKEN", "").strip()
+    token = env_or_runtime_secret("NEURAL4D_API_TOKEN")
     if not token:
         raise RuntimeError("MODEL_PROVIDER=neural4d requires NEURAL4D_API_TOKEN.")
     return {
@@ -1248,7 +1600,7 @@ def neural4d_headers() -> dict[str, str]:
 
 
 def neural4d_model_count() -> int:
-    raw_value = os.getenv("NEURAL4D_MODEL_COUNT", "1").strip()
+    raw_value = runtime_setting_value("NEURAL4D_MODEL_COUNT", "1").strip()
     try:
         value = int(raw_value)
     except ValueError as exc:
@@ -1277,8 +1629,8 @@ def neural4d_post(path: str, payload: dict[str, Any], timeout: int = 60) -> dict
 
 
 def tencent_credentials() -> tuple[str, str]:
-    secret_id = os.getenv("TENCENTCLOUD_SECRET_ID", "").strip()
-    secret_key = os.getenv("TENCENTCLOUD_SECRET_KEY", "").strip()
+    secret_id = env_or_runtime_secret("TENCENTCLOUD_SECRET_ID")
+    secret_key = env_or_runtime_secret("TENCENTCLOUD_SECRET_KEY")
     if not secret_id or not secret_key:
         raise RuntimeError(
             "MODEL_PROVIDER=hunyuan requires TENCENTCLOUD_SECRET_ID and "
@@ -1289,7 +1641,7 @@ def tencent_credentials() -> tuple[str, str]:
 
 
 def tencent_ai3d_config() -> TencentAi3dConfig:
-    profile = os.getenv("TENCENTCLOUD_HUNYUAN_PROFILE", "domestic").strip().lower()
+    profile = runtime_setting_value("TENCENTCLOUD_HUNYUAN_PROFILE", "domestic").strip().lower()
     if profile in {"international", "intl", "global"}:
         host = TENCENT_HUNYUAN_INTL_HOST
         return TencentAi3dConfig(
@@ -1297,7 +1649,7 @@ def tencent_ai3d_config() -> TencentAi3dConfig:
             endpoint=f"https://{host}",
             service=TENCENT_HUNYUAN_INTL_SERVICE,
             version=TENCENT_HUNYUAN_INTL_VERSION,
-            region=os.getenv("TENCENTCLOUD_REGION", "ap-singapore").strip(),
+            region=runtime_setting_value("TENCENTCLOUD_REGION", "ap-singapore").strip(),
         )
 
     if profile in {"domestic", "cn", "china"}:
@@ -1307,7 +1659,7 @@ def tencent_ai3d_config() -> TencentAi3dConfig:
             endpoint=f"https://{host}",
             service=TENCENT_AI3D_SERVICE,
             version=TENCENT_AI3D_VERSION,
-            region=os.getenv("TENCENTCLOUD_REGION", "ap-guangzhou").strip(),
+            region=runtime_setting_value("TENCENTCLOUD_REGION", "ap-guangzhou").strip(),
         )
 
     raise RuntimeError(
@@ -1388,7 +1740,7 @@ def hunyuan_result_format(target_format: TargetFormat) -> str:
 
 def hunyuan_generate_action() -> str:
     return (
-        os.getenv("TENCENTCLOUD_HUNYUAN_GENERATE_ACTION", TENCENT_HUNYUAN_GENERATE_ACTION)
+        runtime_setting_value("TENCENTCLOUD_HUNYUAN_GENERATE_ACTION", TENCENT_HUNYUAN_GENERATE_ACTION)
         .strip()
         or TENCENT_HUNYUAN_GENERATE_ACTION
     )
@@ -1396,7 +1748,7 @@ def hunyuan_generate_action() -> str:
 
 def hunyuan_status_action() -> str:
     return (
-        os.getenv("TENCENTCLOUD_HUNYUAN_STATUS_ACTION", TENCENT_HUNYUAN_STATUS_ACTION)
+        runtime_setting_value("TENCENTCLOUD_HUNYUAN_STATUS_ACTION", TENCENT_HUNYUAN_STATUS_ACTION)
         .strip()
         or TENCENT_HUNYUAN_STATUS_ACTION
     )
@@ -1653,7 +2005,7 @@ async def track_image_generation_progress(job_id: str, expected_seconds: float) 
 
 
 def siliconflow_image_headers() -> dict[str, str]:
-    api_key = os.getenv("SILICONFLOW_API_KEY", "").strip()
+    api_key = env_or_runtime_secret("SILICONFLOW_API_KEY")
     if not api_key:
         raise RuntimeError(
             "IMAGE_PROVIDER=siliconflow requires SILICONFLOW_API_KEY in .env."
@@ -1668,7 +2020,7 @@ def siliconflow_image_payload(
     request: CreateImageJobRequest, seed: int | None = None
 ) -> dict[str, Any]:
     model = (
-        os.getenv("SILICONFLOW_IMAGE_MODEL", SILICONFLOW_DEFAULT_IMAGE_MODEL)
+        runtime_setting_value("SILICONFLOW_IMAGE_MODEL", SILICONFLOW_DEFAULT_IMAGE_MODEL)
         .strip()
         or SILICONFLOW_DEFAULT_IMAGE_MODEL
     )
@@ -1731,7 +2083,7 @@ def create_siliconflow_image(request: CreateImageJobRequest) -> str:
 
 
 def openai_image_headers() -> dict[str, str]:
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    api_key = env_or_runtime_secret("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("IMAGE_PROVIDER=openai requires OPENAI_API_KEY in .env.")
     return {
@@ -1741,12 +2093,12 @@ def openai_image_headers() -> dict[str, str]:
 
 
 def openai_image_model() -> str:
-    return os.getenv("OPENAI_IMAGE_MODEL", OPENAI_DEFAULT_IMAGE_MODEL).strip() or OPENAI_DEFAULT_IMAGE_MODEL
+    return runtime_setting_value("OPENAI_IMAGE_MODEL", OPENAI_DEFAULT_IMAGE_MODEL).strip() or OPENAI_DEFAULT_IMAGE_MODEL
 
 
 def openai_image_base_url() -> str:
     return (
-        os.getenv("OPENAI_IMAGE_BASE_URL", "https://api.openai.com/v1")
+        runtime_setting_value("OPENAI_IMAGE_BASE_URL", "https://api.openai.com/v1")
         .strip()
         .rstrip("/")
     )
@@ -1758,8 +2110,8 @@ def openai_image_payload(request: CreateImageJobRequest) -> dict[str, Any]:
         "prompt": request.prompt.strip(),
         "size": openai_image_size_for_aspect_ratio(request.aspectRatio),
         "n": 1,
-        "quality": os.getenv("OPENAI_IMAGE_QUALITY", "low").strip() or "low",
-        "moderation": os.getenv("OPENAI_IMAGE_MODERATION", "auto").strip() or "auto",
+        "quality": runtime_setting_value("OPENAI_IMAGE_QUALITY", "low").strip() or "low",
+        "moderation": runtime_setting_value("OPENAI_IMAGE_MODERATION", "auto").strip() or "auto",
     }
 
 
@@ -2137,6 +2489,277 @@ async def simulate_generation(job_id: str) -> None:
     )
 
 
+@app.get("/api/admin/summary", response_model=AdminSummary)
+async def admin_summary(authorization: str | None = Header(default=None)) -> AdminSummary:
+    verify_admin_user(authorization)
+    users_response, rows = await asyncio.gather(
+        asyncio.to_thread(supabase_admin_request, "GET", "/auth/v1/admin/users"),
+        asyncio.to_thread(admin_list_generation_rows, include_deleted=True, limit=500),
+    )
+    users_payload = users_response.json()
+    raw_users = users_payload.get("users") if isinstance(users_payload, dict) else users_payload
+    users = raw_users if isinstance(raw_users, list) else []
+    failed_jobs = sum(1 for row in rows if row.get("status") == "failed")
+    running_jobs = sum(1 for row in rows if row.get("status") in {"queued", "running", "postprocessing"})
+    completed_jobs = sum(1 for row in rows if row.get("status") == "completed")
+    return AdminSummary(
+        totalUsers=len(users),
+        totalJobs=len(rows),
+        modelJobs=sum(1 for row in rows if row.get("kind") == "3d"),
+        imageJobs=sum(1 for row in rows if row.get("kind") == "image"),
+        failedJobs=failed_jobs,
+        runningJobs=running_jobs,
+        completedJobs=completed_jobs,
+        recentJobs=[admin_job_response(row) for row in rows[:8]],
+    )
+
+
+@app.get("/api/admin/users", response_model=AdminUsersResponse)
+async def admin_list_users(authorization: str | None = Header(default=None)) -> AdminUsersResponse:
+    verify_admin_user(authorization)
+    response = supabase_admin_request("GET", "/auth/v1/admin/users")
+    payload = response.json()
+    raw_users = payload.get("users") if isinstance(payload, dict) else payload
+    users = [admin_user_from_payload(item) for item in raw_users if isinstance(item, dict)] if isinstance(raw_users, list) else []
+    return AdminUsersResponse(users=users)
+
+
+@app.post("/api/admin/users/{user_id}/action", response_model=AdminUser)
+async def admin_update_user(
+    user_id: str,
+    action: AdminUserAction,
+    authorization: str | None = Header(default=None),
+) -> AdminUser:
+    admin = verify_admin_user(authorization)
+    if action.action == "disable":
+        payload = {"ban_duration": "876000h"}
+        audit_action = "user.disable"
+    else:
+        payload = {"ban_duration": "none"}
+        audit_action = "user.restore"
+    response = supabase_admin_request("PUT", f"/auth/v1/admin/users/{quote(user_id)}", json_body=payload)
+    write_audit_log(admin, audit_action, "user", target_id=user_id)
+    payload = response.json()
+    return admin_user_from_payload(payload if isinstance(payload, dict) else {"id": user_id})
+
+
+@app.delete("/api/admin/users/{user_id}")
+async def admin_delete_user(
+    user_id: str,
+    authorization: str | None = Header(default=None),
+) -> dict[str, bool]:
+    admin = verify_admin_user(authorization)
+    supabase_admin_request("DELETE", f"/auth/v1/admin/users/{quote(user_id)}")
+    write_audit_log(admin, "user.hard_delete", "user", target_id=user_id)
+    return {"ok": True}
+
+
+@app.get("/api/admin/generation-jobs")
+async def admin_list_generation_jobs(
+    kind: str | None = None,
+    status: str | None = None,
+    search: str | None = None,
+    includeDeleted: bool = False,
+    authorization: str | None = Header(default=None),
+) -> dict[str, list[dict[str, Any]]]:
+    verify_admin_user(authorization)
+    rows = admin_list_generation_rows(
+        kind=kind,
+        status=status,
+        search=search,
+        include_deleted=includeDeleted,
+    )
+    return {"jobs": [admin_job_response(row) for row in rows]}
+
+
+def retry_admin_generation(row: dict[str, Any], admin: AuthUser) -> dict[str, Any]:
+    timestamp = now_iso()
+    new_id = str(uuid4())
+    retry_row = {
+        **row,
+        "id": new_id,
+        "status": "queued",
+        "progress": 0,
+        "result_url": None,
+        "thumbnail_url": None,
+        "error": None,
+        "created_at": timestamp,
+        "updated_at": timestamp,
+        "deleted_at": None,
+        "deleted_by": None,
+        "metadata": {
+            **(row.get("metadata") if isinstance(row.get("metadata"), dict) else {}),
+            "retried_from": row.get("id"),
+        },
+    }
+    supabase_admin_request(
+        "POST",
+        "generation_jobs",
+        json_body=retry_row,
+        prefer="return=minimal",
+    )
+    service_authorization = f"Bearer {supabase_service_role_key()}"
+    user = AuthUser(id=str(row.get("user_id") or ""))
+    if row.get("kind") == "3d":
+        job = history_row_to_generation_job(retry_row)
+        jobs[job.id] = job
+        register_job_context(job.id, user, service_authorization)
+        request = CreateJobRequest(
+            prompt=job.prompt,
+            mode=job.mode,
+            quality=job.quality,
+            style=job.style,
+            targetFormat=job.targetFormat,
+        )
+        provider = selected_provider()
+        if provider == "meshy":
+            asyncio.create_task(run_meshy_generation(job.id, request))
+        elif provider == "neural4d":
+            asyncio.create_task(run_neural4d_generation(job.id, request))
+        elif provider == "hunyuan":
+            asyncio.create_task(run_hunyuan_generation(job.id, request))
+        else:
+            asyncio.create_task(simulate_generation(job.id))
+    elif row.get("kind") == "image":
+        job = history_row_to_image_job(retry_row)
+        image_jobs[job.id] = job
+        register_job_context(job.id, user, service_authorization)
+        request = CreateImageJobRequest(prompt=job.prompt, aspectRatio=job.aspectRatio)
+        provider = selected_image_provider()
+        if provider == "openai":
+            asyncio.create_task(run_openai_image_generation(job.id, request))
+        elif provider == "mock":
+            asyncio.create_task(simulate_image_generation(job.id))
+        else:
+            asyncio.create_task(run_siliconflow_image_generation(job.id, request))
+    write_audit_log(admin, "generation_job.retry", "generation_job", target_id=str(row.get("id")), summary=f"new_id={new_id}")
+    return retry_row
+
+
+async def simulate_image_generation(job_id: str) -> None:
+    update_image_job(job_id, status="running", progress=50)
+    await asyncio.sleep(0)
+    update_image_job(job_id, status="completed", progress=100, imageUrl="local://image-jobs/demo/image", error=None)
+
+
+@app.post("/api/admin/generation-jobs/{job_id}/action")
+async def admin_update_generation_job(
+    job_id: str,
+    action: AdminGenerationJobAction,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    admin = verify_admin_user(authorization)
+    if action.action == "retry":
+        row = get_admin_history_row(job_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Generation job not found.")
+        retry_row = retry_admin_generation(row, admin)
+        return {"job": admin_job_response(retry_row)}
+    if action.action == "soft_delete":
+        payload = {"deleted_at": now_iso(), "deleted_by": admin.id, "updated_at": now_iso()}
+        audit_action = "generation_job.soft_delete"
+    else:
+        payload = {"deleted_at": None, "deleted_by": None, "updated_at": now_iso()}
+        audit_action = "generation_job.restore"
+    supabase_admin_request(
+        "PATCH",
+        f"generation_jobs?id=eq.{quote(job_id)}",
+        json_body=payload,
+        prefer="return=minimal",
+    )
+    write_audit_log(admin, audit_action, "generation_job", target_id=job_id)
+    row = get_admin_history_row(job_id) or {"id": job_id, **payload}
+    return {"job": admin_job_response(row)}
+
+
+@app.delete("/api/admin/generation-jobs/{job_id}")
+async def admin_delete_generation_job(
+    job_id: str,
+    authorization: str | None = Header(default=None),
+) -> dict[str, bool]:
+    admin = verify_admin_user(authorization)
+    supabase_admin_request("DELETE", f"generation_jobs?id=eq.{quote(job_id)}")
+    write_audit_log(admin, "generation_job.hard_delete", "generation_job", target_id=job_id)
+    return {"ok": True}
+
+
+@app.get("/api/admin/settings", response_model=AdminSettingsResponse)
+async def admin_get_settings(authorization: str | None = Header(default=None)) -> AdminSettingsResponse:
+    verify_admin_user(authorization)
+    response = supabase_admin_request(
+        "GET",
+        "admin_settings?select=key,value,is_secret,updated_at&order=key.asc",
+    )
+    data = response.json()
+    rows = data if isinstance(data, list) else []
+    merged_rows = merge_settings_with_environment(rows)
+    return AdminSettingsResponse(settings=[admin_setting_view(row) for row in merged_rows])
+
+
+@app.put("/api/admin/settings", response_model=AdminSettingsResponse)
+async def admin_update_settings(
+    request: AdminSettingsUpdate,
+    authorization: str | None = Header(default=None),
+) -> AdminSettingsResponse:
+    admin = verify_admin_user(authorization)
+    timestamp = now_iso()
+    rows = [
+        {
+            "key": setting.key.strip(),
+            "value": setting.value,
+            "is_secret": setting.isSecret or setting.key.strip() in ADMIN_SECRET_KEYS,
+            "updated_by": admin.id,
+            "updated_at": timestamp,
+        }
+        for setting in request.settings
+        if setting.key.strip()
+    ]
+    if rows:
+        update_local_env_file({row["key"]: row["value"] or "" for row in rows})
+        supabase_admin_request(
+            "POST",
+            "admin_settings",
+            json_body=rows,
+            prefer="resolution=merge-duplicates,return=minimal",
+        )
+        write_audit_log(
+            admin,
+            "settings.update",
+            "admin_settings",
+            summary=", ".join(row["key"] for row in rows),
+        )
+        clear_runtime_settings_cache()
+    return await admin_get_settings(authorization)
+
+
+@app.get("/api/admin/audit-logs")
+async def admin_list_audit_logs(
+    authorization: str | None = Header(default=None),
+) -> dict[str, list[AdminAuditLog]]:
+    verify_admin_user(authorization)
+    response = supabase_admin_request(
+        "GET",
+        "admin_audit_logs?select=*&order=created_at.desc&limit=100",
+    )
+    data = response.json()
+    rows = data if isinstance(data, list) else []
+    logs = [
+        AdminAuditLog(
+            id=row.get("id"),
+            adminId=row.get("admin_id"),
+            adminEmail=row.get("admin_email"),
+            action=str(row.get("action") or ""),
+            targetType=str(row.get("target_type") or ""),
+            targetId=row.get("target_id"),
+            summary=row.get("summary"),
+            createdAt=row.get("created_at"),
+        )
+        for row in rows
+        if isinstance(row, dict)
+    ]
+    return {"logs": logs}
+
+
 @app.get("/api/health")
 async def health() -> dict[str, str]:
     return {
@@ -2202,19 +2825,19 @@ async def create_job(
         raise HTTPException(status_code=400, detail="Prompt is required.")
 
     provider = selected_provider()
-    if provider == "meshy" and not os.getenv("MESHY_API_KEY", "").strip():
+    if provider == "meshy" and not env_or_runtime_secret("MESHY_API_KEY"):
         raise HTTPException(
             status_code=400,
             detail="MODEL_PROVIDER=meshy requires MESHY_API_KEY in .env or the shell environment.",
         )
-    if provider == "neural4d" and not os.getenv("NEURAL4D_API_TOKEN", "").strip():
+    if provider == "neural4d" and not env_or_runtime_secret("NEURAL4D_API_TOKEN"):
         raise HTTPException(
             status_code=400,
             detail="MODEL_PROVIDER=neural4d requires NEURAL4D_API_TOKEN in .env or the shell environment.",
         )
     if provider == "hunyuan" and (
-        not os.getenv("TENCENTCLOUD_SECRET_ID", "").strip()
-        or not os.getenv("TENCENTCLOUD_SECRET_KEY", "").strip()
+        not env_or_runtime_secret("TENCENTCLOUD_SECRET_ID")
+        or not env_or_runtime_secret("TENCENTCLOUD_SECRET_KEY")
     ):
         raise HTTPException(
             status_code=400,
@@ -2282,12 +2905,12 @@ async def create_image_job(
             status_code=400,
             detail="IMAGE_PROVIDER must be siliconflow, openai, or mock.",
         )
-    if provider == "siliconflow" and not os.getenv("SILICONFLOW_API_KEY", "").strip():
+    if provider == "siliconflow" and not env_or_runtime_secret("SILICONFLOW_API_KEY"):
         raise HTTPException(
             status_code=400,
             detail="IMAGE_PROVIDER=siliconflow requires SILICONFLOW_API_KEY in .env.",
         )
-    if provider == "openai" and not os.getenv("OPENAI_API_KEY", "").strip():
+    if provider == "openai" and not env_or_runtime_secret("OPENAI_API_KEY"):
         raise HTTPException(
             status_code=400,
             detail="IMAGE_PROVIDER=openai requires OPENAI_API_KEY in .env.",
