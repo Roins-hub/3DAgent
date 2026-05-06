@@ -2,6 +2,7 @@
   "name": "3d-agent-platform",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "workspaces": [
     "apps/web",
     "packages/shared"

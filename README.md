@@ -200,3 +200,7 @@ docs
 sheji
 README.md
 ```
+
+## 开源协议
+
+本项目基于 MIT License 开源，详见 [LICENSE](./LICENSE)。
