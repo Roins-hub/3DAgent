@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
+import { AuthProvider } from "@/components/auth/AuthProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Forma Agent | 3D 模型 AI 生成平台",
-  description: "聊天式 3D 资产生成平台 MVP。",
+  title: "智模工坊 AI 工业模型工作台",
+  description: "面向工业设计需求的 AI 工业模型与图像方案工作台",
 };
 
 export default function RootLayout({
@@ -12,8 +13,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN" data-scroll-behavior="smooth">
-      <body>{children}</body>
+    <html
+      lang="zh-CN"
+      data-scroll-behavior="smooth"
+    >
+      <body>
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }

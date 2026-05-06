@@ -4,19 +4,93 @@ import type { GenerationJob, TargetFormat } from "@3dagent/shared";
 import {
   AlertCircle,
   ArrowLeft,
+  Boxes,
   ChevronDown,
   Download,
-  Play,
   Send,
   Sparkles,
 } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { API_BASE_URL, api } from "@/lib/api";
+import { getAuthHeaders } from "@/lib/supabase";
 import { useGenerationStore } from "@/store/useGenerationStore";
 import { Button } from "@/components/ui/Button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { GenerationCanvas } from "./GenerationCanvas";
+
+const exportFormatOptions: Array<{
+  value: TargetFormat;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "glb",
+    label: "GLB",
+    description: "默认格式，适合网页预览和通用交付。",
+  },
+  {
+    value: "fbx",
+    label: "FBX",
+    description: "适合 DCC 工具、动画和游戏管线。",
+  },
+  {
+    value: "obj",
+    label: "OBJ",
+    description: "通用网格格式，便于跨软件交换。",
+  },
+  {
+    value: "stl",
+    label: "STL",
+    description: "适合 3D 打印和几何检查。",
+  },
+];
+
+const modelTypeCopy = {
+  furniture: {
+    label: "家具模型",
+    hint: "沙发、桌椅、柜体与室内陈设模型",
+    placeholder: "输入你想生成的家具模型，例如一张北欧风实木书桌，带圆角桌面、抽屉和金属桌腿",
+  },
+  stationery: {
+    label: "文具模型",
+    hint: "笔、收纳、桌面工具与学习用品模型",
+    placeholder: "输入你想生成的文具模型，例如一支未来感中性笔，透明笔杆、金属笔夹和防滑握把",
+  },
+  industrial: {
+    label: "工业制作模型",
+    hint: "设备外壳、生产夹具与机械结构模型",
+    placeholder: "输入你想生成的工业制作模型，例如一台紧凑型检测设备外壳，带散热孔、屏幕和按钮面板",
+  },
+  cultural: {
+    label: "文创设计模型",
+    hint: "摆件、礼品、纪念品与品牌衍生模型",
+    placeholder: "输入你想生成的文创设计模型，例如一款城市地标纪念摆件，含底座、浮雕纹理和礼品展示感",
+  },
+};
+
+type ModelType = keyof typeof modelTypeCopy;
+
+function getModelType(value: string | null): ModelType {
+  if (
+    value === "furniture" ||
+    value === "stationery" ||
+    value === "industrial" ||
+    value === "cultural"
+  ) {
+    return value;
+  }
+
+  return "industrial";
+}
 
 function formatTime(value: string) {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -26,11 +100,15 @@ function formatTime(value: string) {
 }
 
 export function StudioShell() {
+  const searchParams = useSearchParams();
+  const modelType = getModelType(searchParams.get("type"));
+  const currentModelType = modelTypeCopy[modelType];
   const { jobs, activeJobId, setJobs, upsertJob, setActiveJobId } =
     useGenerationStore();
   const [prompt, setPrompt] = useState("");
-  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportFormat, setExportFormat] = useState<TargetFormat>("glb");
   const [error, setError] = useState<string | null>(null);
 
   const activeJob = useMemo(
@@ -43,7 +121,7 @@ export function StudioShell() {
       .listJobs()
       .then(setJobs)
       .catch(() => {
-        setError(`API 未连接，请确认 FastAPI 已在 ${API_BASE_URL} 启动。`);
+        setError(`API 未连接，请确认 FastAPI 已在 ${API_BASE_URL} 启动`);
       });
   }, [setJobs]);
 
@@ -61,9 +139,9 @@ export function StudioShell() {
         const nextJob = await api.getJob(activeJob.id);
         upsertJob(nextJob);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "任务轮询失败。");
+        setError(err instanceof Error ? err.message : "任务轮询失败");
       }
-    }, 900);
+    }, 1200);
 
     return () => window.clearInterval(interval);
   }, [activeJob, upsertJob]);
@@ -77,12 +155,12 @@ export function StudioShell() {
         mode: "text-to-3d",
         quality: "balanced",
         style: "game-ready",
-        targetFormat: "glb",
+        targetFormat: exportFormat,
       });
       upsertJob(job);
       setActiveJobId(job.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "创建任务失败。");
+      setError(err instanceof Error ? err.message : "创建任务失败");
     } finally {
       setIsSubmitting(false);
     }
@@ -93,29 +171,33 @@ export function StudioShell() {
     setPrompt(job.prompt);
   }
 
-  async function exportModel(format: TargetFormat) {
+  async function exportModel() {
     if (!activeJob || !canDownload) return;
     setError(null);
-    setIsExportMenuOpen(false);
+    setIsExporting(true);
 
     try {
-      const response = await fetch(api.modelUrl(activeJob.id, format));
+      const response = await fetch(api.modelUrl(activeJob.id, exportFormat), {
+        headers: await getAuthHeaders(),
+      });
       if (!response.ok) {
         const body = await response.json().catch(() => null);
-        throw new Error(body?.detail ?? `导出失败：${response.status}`);
+        throw new Error(body?.detail ?? `导出失败 ${response.status}`);
       }
 
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `${activeJob.prompt.slice(0, 24) || "model"}.${format}`;
+      link.download = `${activeJob.prompt.slice(0, 24) || "model"}.${exportFormat}`;
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "导出失败。");
+      setError(err instanceof Error ? err.message : "导出失败");
+    } finally {
+      setIsExporting(false);
     }
   }
 
@@ -128,179 +210,179 @@ export function StudioShell() {
         ? activeJob.modelUrl
         : api.modelUrl(activeJob.id, activeJob.targetFormat)
       : null;
+  const selectedExportOption =
+    exportFormatOptions.find((option) => option.value === exportFormat) ??
+    exportFormatOptions[0];
 
   return (
-    <main className="min-h-screen bg-[#ece7dc] text-[#171817]">
-      <header className="relative z-50 flex items-center justify-between overflow-visible border-b border-black/10 bg-[#f7f2e8]/85 px-4 py-3 backdrop-blur md:px-6">
-        <div className="flex items-center gap-3">
-          <Link
-            href="/"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-md hover:bg-black/[0.05]"
-            aria-label="返回首页"
-          >
-            <ArrowLeft size={19} />
+    <main className="studio-workspace studio-workspace--model">
+      <header className="studio-workspace-topbar">
+        <div className="studio-topbar-left">
+          <Link href="/" className="studio-back-button" aria-label="返回首页">
+            <ArrowLeft size={20} />
           </Link>
           <div>
-            <p className="font-bold">3D 模型工作台</p>
-            <p className="text-xs text-[#656057]">
-              文本生成 3D、版本历史与模型导出
-            </p>
+            <p>{currentModelType.label}工作台</p>
+            <span>{currentModelType.hint} · 文本生成、模型预览、历史导出</span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <StatusBadge status={activeJob?.status ?? "queued"} />
-          <div className="relative z-50">
+        <div className="studio-topbar-actions">
+          {activeJob ? (
+            <StatusBadge status={activeJob.status} />
+          ) : (
+            <span className="studio-ready-pill">就绪</span>
+          )}
+          <div className="studio-export-menu">
             <Button
-              variant="dark"
-              disabled={!canDownload}
-              onClick={() => setIsExportMenuOpen((value) => !value)}
-              aria-expanded={isExportMenuOpen}
-            >
-              <Download size={16} />
-              导出
-              <ChevronDown size={15} />
+            variant="dark"
+            className="studio-export-main-button"
+            disabled={!canDownload || isExporting}
+            onClick={() => void exportModel()}
+            aria-busy={isExporting}
+            title={canDownload ? `导出 ${selectedExportOption.label}` : "模型完成后可导出"}
+          >
+            <Download className={isExporting ? "animate-pulse" : undefined} size={16} />
+            <span className="sm:hidden">导出</span>
+            <span className="hidden sm:inline">
+              导出 {selectedExportOption.label}
+            </span>
             </Button>
-            {isExportMenuOpen && (
-              <div className="absolute right-0 top-11 z-[80] w-40 overflow-hidden rounded-md border border-black/10 bg-white p-1 text-sm shadow-xl">
-                {(["glb", "fbx", "obj"] as TargetFormat[]).map((format) => (
-                  <button
-                    className="flex w-full items-center justify-between rounded px-3 py-2 text-left font-semibold text-[#202421] hover:bg-[#20766f]/10 disabled:cursor-not-allowed disabled:text-[#8b8579] disabled:hover:bg-transparent"
-                    disabled={format !== activeJob?.targetFormat}
-                    key={format}
-                    onClick={() => void exportModel(format)}
+            <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="dark"
+                size="icon"
+                className="studio-export-menu-trigger"
+                aria-label="选择导出格式"
+                title="选择导出格式"
+              >
+                <ChevronDown size={16} aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              className="w-64 border-white/70 bg-white/95 text-slate-950 shadow-xl backdrop-blur"
+              side="bottom"
+              sideOffset={8}
+              align="end"
+            >
+              <DropdownMenuRadioGroup
+                value={exportFormat}
+                onValueChange={(value) => setExportFormat(value as TargetFormat)}
+              >
+                {exportFormatOptions.map((option) => (
+                  <DropdownMenuRadioItem
+                    key={option.value}
+                    value={option.value}
+                    className="items-start [&>span]:pt-1.5"
                   >
-                    <span>{format.toUpperCase()}</span>
-                    {format === activeJob?.targetFormat && (
-                      <span className="text-xs text-[#20766f]">可用</span>
-                    )}
-                  </button>
+                    <div className="flex flex-col gap-1">
+                      <span className="text-sm font-semibold">{option.label}</span>
+                      <span className="text-xs text-slate-500">{option.description}</span>
+                    </div>
+                  </DropdownMenuRadioItem>
                 ))}
-              </div>
-            )}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </header>
 
-      <section className="grid min-h-[calc(100vh-65px)] grid-rows-[auto_1fr_auto] gap-3 p-3 lg:grid-cols-[390px_1fr] lg:grid-rows-[1fr_auto]">
-        <aside className="surface flex min-h-[540px] flex-col rounded-lg p-4 lg:row-span-2">
-          <div className="mb-4 flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-md bg-[#202421] text-[#f7f1e7]">
-              <Sparkles size={17} />
+      <section className="studio-workspace-grid">
+        <aside className="studio-glass-panel studio-input-panel">
+          <div className="studio-panel-heading">
+            <span>
+              <Sparkles size={18} />
             </span>
             <div>
-              <h1 className="font-bold">生成对话</h1>
-              <p className="text-xs text-[#656057]">文本驱动 3D 模型生成</p>
+              <h1>生成输入</h1>
+              <p>只填写当前接口真实使用的提示词</p>
             </div>
           </div>
 
-          <div className="mb-4 flex-1 space-y-3 overflow-auto rounded-lg border border-black/10 bg-white/50 p-3">
-            <div className="rounded-lg bg-[#202421] p-3 text-sm leading-6 text-[#f7f1e7]">
-              告诉我你想生成什么模型，我会准备网格、材质和导出设置。
+          <textarea
+            className="studio-textarea"
+            placeholder={currentModelType.placeholder}
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+          />
+
+          {error && (
+            <div className="studio-error">
+              <AlertCircle size={16} />
+              <span>{error}</span>
             </div>
-            {activeJob && (
-              <div className="rounded-lg bg-[#20766f]/10 p-3 text-sm leading-6 text-[#1b514c]">
-                {activeJob.prompt}
-                <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/10">
-                  <div
-                    className="h-full rounded-full bg-[#20766f] transition-all"
-                    style={{ width: `${activeJob.progress}%` }}
-                  />
-                </div>
-                {activeJob.error && (
-                  <p className="mt-2 text-xs text-red-700">{activeJob.error}</p>
-                )}
+          )}
+
+          <Button
+            className="studio-primary-action"
+            disabled={isSubmitting || prompt.trim().length === 0}
+            onClick={() => void submitGeneration()}
+            aria-busy={isSubmitting}
+          >
+            <Send className={isSubmitting ? "animate-pulse" : undefined} size={16} />
+            生成模型
+          </Button>
+
+          {activeJob && (
+            <div className="studio-current-card">
+              <div>
+                <span>当前任务</span>
+                <StatusBadge status={activeJob.status} />
               </div>
-            )}
-          </div>
-
-          <div className="space-y-3">
-            <textarea
-              className="min-h-28 w-full resize-none rounded-md border border-black/10 bg-white/70 p-3 text-sm leading-6 outline-none transition focus:border-[#20766f]"
-              placeholder="请输入你想生成的 3D 模型，例如：生成一个写实风格的陶瓷杯，带蓝色釉面。"
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-            />
-            <div className="rounded-md border border-[#20766f]/20 bg-[#20766f]/10 px-3 py-2 text-xs font-semibold text-[#1b514c]">
-              当前模式：文本生成 3D
-            </div>
-
-            {error && (
-              <div className="flex items-start gap-2 rounded-md bg-red-600/10 p-3 text-sm text-red-700">
-                <AlertCircle className="mt-0.5 shrink-0" size={16} />
-                {error}
+              <p>{activeJob.prompt}</p>
+              <div className="studio-progress-label">
+                <span>实时进度</span>
+                <strong>{activeJob.progress}%</strong>
               </div>
-            )}
-
-            <Button
-              className="w-full"
-              disabled={isSubmitting || prompt.trim().length === 0}
-              onClick={() => void submitGeneration()}
-              aria-busy={isSubmitting}
-            >
-              <Send className={isSubmitting ? "animate-pulse" : undefined} size={16} />
-              生成模型
-            </Button>
-          </div>
+              <div className="studio-progress">
+                <i style={{ width: `${activeJob.progress}%` }} />
+              </div>
+              {activeJob.error && <small>{activeJob.error}</small>}
+            </div>
+          )}
         </aside>
 
-        <section className="dark-surface rounded-lg p-3">
+        <section className="studio-preview-panel">
           <GenerationCanvas activeJob={activeJob} modelUrl={resolvedModelUrl} />
         </section>
 
-        <section className="surface rounded-lg p-4 lg:col-start-2">
-          <div className="mb-3 flex items-center justify-between gap-3">
+        <aside className="studio-glass-panel studio-history-panel">
+          <div className="studio-panel-heading">
+            <span>
+              <Boxes size={18} />
+            </span>
             <div>
-              <h2 className="font-bold">生成历史</h2>
-              <p className="text-xs text-[#656057]">
-                选择任意版本，可恢复对应提示词和预览状态。
-              </p>
+              <h2>生成历史</h2>
+              <p>点击历史项恢复提示词和预览</p>
             </div>
-            <Button
-              variant="secondary"
-              disabled={prompt.trim().length === 0}
-              onClick={() => void submitGeneration()}
-            >
-              <Play size={15} />
-              再生成一次
-            </Button>
           </div>
 
-          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-            {jobs.length === 0 ? (
-              <div className="rounded-md border border-dashed border-black/15 p-4 text-sm text-[#656057]">
-                暂无任务。请先在左侧输入提示词并开始生成。
-              </div>
-            ) : (
-              jobs.map((job) => (
+          {jobs.length === 0 ? (
+            <div className="studio-empty-state">
+              暂无任务，请先输入提示词并生成模型
+            </div>
+          ) : (
+            <div className="studio-history-list">
+              {jobs.map((job) => (
                 <button
-                  className={`rounded-md border p-3 text-left transition ${
-                    job.id === activeJobId
-                      ? "border-[#20766f] bg-[#20766f]/10"
-                      : "border-black/10 bg-white/55 hover:bg-white"
-                  }`}
+                  className={job.id === activeJobId ? "is-active" : undefined}
                   key={job.id}
                   onClick={() => selectJob(job)}
                 >
-                  <div className="mb-3 flex items-center justify-between gap-2">
+                  <div>
                     <StatusBadge status={job.status} />
-                    <span className="text-xs text-[#656057]">
-                      {formatTime(job.createdAt)}
-                    </span>
+                    <span>{formatTime(job.createdAt)}</span>
                   </div>
-                  <p className="line-clamp-2 text-sm font-semibold leading-5">
-                    {job.prompt}
-                  </p>
-                  <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-black/10">
-                    <span
-                      className="block h-full rounded-full bg-[#20766f]"
-                      style={{ width: `${job.progress}%` }}
-                    />
+                  <p>{job.prompt}</p>
+                  <div className="studio-progress">
+                    <i style={{ width: `${job.progress}%` }} />
                   </div>
                 </button>
-              ))
-            )}
-          </div>
-        </section>
+              ))}
+            </div>
+          )}
+        </aside>
       </section>
     </main>
   );

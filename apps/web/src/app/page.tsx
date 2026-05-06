@@ -1,159 +1,263 @@
 import {
-  ArrowRight,
   Boxes,
-  BrainCircuit,
-  Download,
+  CheckCircle2,
+  Cpu,
+  Database,
+  FileCode2,
+  GitBranch,
   Image as ImageIcon,
-  Sparkles,
+  Layers3,
+  Network,
+  ScanSearch,
 } from "lucide-react";
 import Link from "next/link";
-import { Button } from "@/components/ui/Button";
+import { AuroraStart } from "@/components/ui/aurora-start";
+import { Header } from "@/components/ui/header-2";
+import {
+  AnimatedClosingMark,
+  AnimatedStudioObject,
+  Reveal,
+} from "@/components/ui/scroll-motion";
 
-const workflows = [
-  "输入生成需求",
-  "选择 3D 或图片工作台",
-  "调用后端 API 生成结果",
-  "预览、复用历史、下载资产",
+const studios = [
+  {
+    href: "/model",
+    label: "Text to 3D Pipeline",
+    title: "三维资产生成引擎",
+    body: "面向工业设计、文创建模与产品原型场景，提供提示词解析、供应商路由、PBR 材质生成、GLB FBX OBJ 格式交付的完整链路。",
+    action: "进入三维生成",
+    stat: "GLB",
+    Icon: Boxes,
+  },
+  {
+    href: "/image",
+    label: "Industrial Image Studio",
+    title: "工业图像方案引擎",
+    body: "围绕比例控制、方案预览、历史追踪与下载交付组织图像生成过程，让概念表达、视觉验证和迭代管理保持一致。",
+    action: "进入图像生成",
+    stat: "1比1 16比9",
+    Icon: ImageIcon,
+  },
 ];
 
-const capabilities = [
+const flowDiagrams = [
   {
-    title: "3D 模型生成",
-    body: "通过腾讯云混元生 3D 国内站接口提交文本生成任务，并在浏览器里预览、导出模型。",
-    icon: Boxes,
+    eyebrow: "Generation Orchestration",
+    title: "三维生成编排流程",
+    Icon: GitBranch,
+    nodes: [
+      "提示词语义解析",
+      "任务参数标准化",
+      "模型供应商适配",
+      "异步进度轮询",
+      "资产地址回写",
+    ],
   },
   {
-    title: "图片生成",
-    body: "通过 SiliconFlow 文生图接口生成图片，后端代理图片流，避免浏览器跨域和重定向问题。",
-    icon: ImageIcon,
+    eyebrow: "Asset Postprocess",
+    title: "资产后处理流程",
+    Icon: Layers3,
+    nodes: [
+      "网格拓扑检查",
+      "PBR 材质映射",
+      "尺度与原点归一化",
+      "格式转换导出",
+      "历史版本沉淀",
+    ],
   },
   {
-    title: "任务历史与下载",
-    body: "模型和图片各自保留独立历史，方便回看提示词、恢复预览和下载生成资产。",
-    icon: Download,
+    eyebrow: "Image Production",
+    title: "图像方案生成流程",
+    Icon: ScanSearch,
+    nodes: [
+      "创意目标输入",
+      "画幅比例约束",
+      "生成结果预览",
+      "方案历史归档",
+      "下载与复用",
+    ],
   },
 ];
+
+const capabilityTree = [
+  {
+    title: "前端工作台",
+    items: ["响应式任务入口", "三维预览画布", "图像方案空间", "历史记录面板"],
+    Icon: Cpu,
+  },
+  {
+    title: "服务编排层",
+    items: ["FastAPI 任务接口", "Provider 路由", "异步状态同步", "配置化密钥管理"],
+    Icon: Database,
+  },
+  {
+    title: "模型能力层",
+    items: ["Hunyuan3D", "Neural4D", "Meshy Preview", "Mock GPU Worker"],
+    Icon: FileCode2,
+  },
+];
+
+const principles = [
+  "统一三维模型与工业图像生成入口",
+  "保留任务状态历史与可追溯交付记录",
+  "支持多供应商模型服务平滑切换",
+  "围绕工程资产格式建立交付闭环",
+];
+
+function PillLink({
+  href,
+  children,
+  outline = false,
+}: {
+  href: string;
+  children: React.ReactNode;
+  outline?: boolean;
+}) {
+  return (
+    <Link className={outline ? "apple-pill apple-pill--outline" : "apple-pill"} href={href}>
+      {children}
+    </Link>
+  );
+}
 
 export default function Home() {
   return (
-    <main className="min-h-screen overflow-hidden subtle-grid">
-      <header className="mx-auto flex max-w-7xl items-center justify-between px-5 py-5">
-        <Link href="/" className="flex items-center gap-3">
-          <span className="flex h-9 w-9 items-center justify-center rounded-md bg-[#202421] text-[#f7f1e7]">
-            <Sparkles size={18} />
-          </span>
-          <span className="text-base font-bold tracking-tight">Forma Agent</span>
-        </Link>
-        <nav className="hidden items-center gap-6 text-sm font-medium text-[#5b574f] md:flex">
-          <a href="#workflow">流程</a>
-          <a href="#capabilities">能力</a>
-          <Link href="/studio">3D 工作台</Link>
-          <Link href="/image">图片生成</Link>
-        </nav>
-      </header>
+    <main className="apple-home">
+      <Header />
+      <AuroraStart />
 
-      <section className="mx-auto grid min-h-[calc(100vh-84px)] max-w-7xl items-center gap-10 px-5 pb-12 pt-4 lg:grid-cols-[0.9fr_1.1fr]">
-        <div className="max-w-[660px]">
-          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-black/10 bg-white/60 px-3 py-1 text-sm font-semibold text-[#20766f]">
-            <span className="h-2 w-2 rounded-full bg-[#20766f]" />
-            AI 资产生成工作台
+      <section id="studios" className="studio-tiles" aria-label="工作台入口">
+        {studios.map(({ Icon, ...studio }, index) => (
+          <article
+            className={index === 0 ? "studio-tile studio-tile--dark" : "studio-tile studio-tile--light"}
+            key={studio.href}
+          >
+            <Reveal className="studio-copy" delay={0.04}>
+              <span className="studio-icon">
+                <Icon size={28} />
+              </span>
+              <p className="apple-eyebrow">{studio.label}</p>
+              <h2>{studio.title}</h2>
+              <p>{studio.body}</p>
+              <Link href={studio.href} className="apple-text-link">
+                {studio.action}
+              </Link>
+            </Reveal>
+            <AnimatedStudioObject
+              stat={studio.stat}
+              dark={index === 0}
+              delay={0.16}
+            />
+          </article>
+        ))}
+      </section>
+
+      <section id="workflow" className="apple-tile apple-tile--white workflow-section" aria-labelledby="workflow-title">
+        <Reveal className="apple-section-heading">
+          <p className="apple-eyebrow">Workflow Architecture</p>
+          <h2 id="workflow-title">专业化生成流程</h2>
+          <p>平台将自然语言需求拆解为任务编排、模型调用、资产后处理和结果归档，让三维模型与图像方案都具备清晰的工程化路径。</p>
+        </Reveal>
+        <div className="workflow-grid">
+          {flowDiagrams.map(({ Icon, ...diagram }, index) => (
+            <Reveal as="article" className="workflow-card workflow-card--diagram" delay={0.12 + index * 0.1} key={diagram.title}>
+              <div className="workflow-card-header">
+                <span className="workflow-card-icon">
+                  <Icon size={20} />
+                </span>
+                <p>{diagram.eyebrow}</p>
+              </div>
+              <h3>{diagram.title}</h3>
+              <div className="workflow-flow" aria-label={diagram.title}>
+                {diagram.nodes.map((node, nodeIndex) => (
+                  <div className="workflow-node" key={node}>
+                    <span>{String(nodeIndex + 1).padStart(2, "0")}</span>
+                    <strong>{node}</strong>
+                  </div>
+                ))}
+              </div>
+            </Reveal>
+          ))}
+        </div>
+      </section>
+
+      <section id="capability" className="apple-tile apple-tile--parchment capability-section" aria-labelledby="capability-title">
+        <Reveal className="apple-section-heading">
+          <p className="apple-eyebrow">System Capability Tree</p>
+          <h2 id="capability-title">系统能力树</h2>
+          <p>当前项目已经形成从前端工作台到服务编排层再到模型能力层的分层结构，便于后续接入自托管 GPU Worker 和更多工业设计流程。</p>
+        </Reveal>
+        <div className="capability-tree" aria-label="系统能力树">
+          <div className="capability-root">
+            <Network size={24} />
+            <strong>3D Agent Platform</strong>
           </div>
-          <h1 className="text-4xl font-semibold leading-[1.08] tracking-tight text-[#171817] sm:text-5xl lg:text-[56px] xl:text-[62px]">
-            <span className="block">用一句描述生成</span>
-            <span className="block">3D 模型与图片资产</span>
-          </h1>
-          <p className="mt-6 max-w-xl text-lg leading-8 text-[#5b574f]">
-            Forma Agent 现在包含两个独立工作台：3D 模型生成用于创建可导出的
-            GLB 资产，图片生成用于快速产出概念图、参考图和视觉素材。
+          <div className="capability-branches">
+            {capabilityTree.map(({ Icon: BranchIcon, ...branch }, index) => {
+              return (
+                <Reveal as="article" className="capability-branch" delay={0.12 + index * 0.1} key={branch.title}>
+                  <div className="capability-branch-title">
+                    <BranchIcon size={19} />
+                    <h3>{branch.title}</h3>
+                  </div>
+                  <ul>
+                    {branch.items.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </Reveal>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section id="principles" className="apple-tile apple-tile--dark principles-section" aria-labelledby="principles-title">
+        <Reveal className="principles-copy">
+          <p className="apple-eyebrow">Design Principles</p>
+          <h2 id="principles-title">面向工程交付</h2>
+          <p>
+            首页现在聚焦工业设计生产链路，用更明确的专业术语解释模型生成、图像方案、任务记录和资产交付之间的关系。
           </p>
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Link href="/studio">
-              <Button className="w-full sm:w-auto">
-                打开 3D 工作台
-                <ArrowRight size={17} />
-              </Button>
-            </Link>
-            <Link href="/image">
-              <Button variant="secondary" className="w-full sm:w-auto">
-                <ImageIcon size={17} />
-                打开图片生成
-              </Button>
-            </Link>
-          </div>
-        </div>
-
-        <div className="surface relative overflow-hidden rounded-lg p-3">
-          <div className="grid gap-3 lg:grid-cols-2">
-            <div className="dark-surface overflow-hidden rounded-lg">
-              <div className="border-b border-white/10 px-4 py-3">
-                <p className="text-sm font-semibold">3D 模型工作台</p>
-                <p className="text-xs text-white/55">文本到可导出模型</p>
+        </Reveal>
+        <div className="principles-list">
+          {principles.map((item, index) => (
+            <Reveal delay={0.12 + index * 0.08} key={item}>
+              <div>
+                <CheckCircle2 size={18} />
+                <span>{item}</span>
               </div>
-              <div className="relative min-h-[360px] p-5">
-                <div className="absolute inset-5 rounded-lg border border-white/10 bg-[#151815]" />
-                <div className="absolute left-1/2 top-1/2 h-44 w-44 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[28px] border border-[#c77a2f]/50 bg-[#c77a2f]/20 shadow-2xl shadow-[#c77a2f]/20" />
-                <div className="absolute bottom-7 left-7 right-7 grid grid-cols-4 gap-2">
-                  {[58, 82, 43, 72].map((height, index) => (
-                    <span
-                      className="rounded-sm bg-white/10"
-                      key={index}
-                      style={{ height }}
-                    />
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="dark-surface overflow-hidden rounded-lg">
-              <div className="border-b border-white/10 px-4 py-3">
-                <p className="text-sm font-semibold">图片生成工作台</p>
-                <p className="text-xs text-white/55">免费文生图预览</p>
-              </div>
-              <div className="relative min-h-[360px] p-5">
-                <div className="absolute inset-5 rounded-lg border border-white/10 bg-[#101511]" />
-                <div className="absolute left-10 top-10 h-28 w-40 rounded-md bg-[#9bc8c1]/70 shadow-2xl shadow-[#9bc8c1]/20" />
-                <div className="absolute bottom-12 right-10 h-44 w-36 rounded-md bg-[#c77a2f]/70 shadow-2xl shadow-[#c77a2f]/20" />
-                <div className="absolute bottom-20 left-16 right-16 h-20 rounded-[50%] bg-white/10 blur-xl" />
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="workflow" className="mx-auto max-w-7xl px-5 py-16 md:py-20">
-        <div className="mb-8 flex items-end justify-between gap-6">
-          <div>
-            <p className="mb-2 text-sm font-bold uppercase text-[#20766f]">
-              生成流程
-            </p>
-            <h2 className="text-3xl font-semibold tracking-tight">
-              从一句提示词到可下载资产。
-            </h2>
-          </div>
-        </div>
-        <div className="grid gap-3 md:grid-cols-4">
-          {workflows.map((step, index) => (
-            <div className="surface rounded-lg p-5" key={step}>
-              <p className="mb-8 text-sm font-bold text-[#c77a2f]">
-                0{index + 1}
-              </p>
-              <h3 className="text-xl font-semibold">{step}</h3>
-            </div>
+            </Reveal>
           ))}
         </div>
       </section>
 
-      <section id="capabilities" className="mx-auto max-w-7xl px-5 pb-20">
-        <div className="grid gap-4 md:grid-cols-3">
-          {capabilities.map((item) => (
-            <article className="surface rounded-lg p-6" key={item.title}>
-              <item.icon className="mb-8 text-[#20766f]" size={24} />
-              <h3 className="text-xl font-semibold">{item.title}</h3>
-              <p className="mt-3 leading-7 text-[#5b574f]">{item.body}</p>
-            </article>
-          ))}
-        </div>
+      <section className="apple-tile apple-tile--parchment closing-section">
+        <Reveal>
+          <p className="apple-eyebrow">Ready</p>
+          <h2>进入工业生成工作台</h2>
+          <div className="apple-hero-actions">
+            <PillLink href="/model">打开三维模型生成</PillLink>
+            <PillLink href="/image" outline>
+              打开图像方案生成
+            </PillLink>
+          </div>
+        </Reveal>
+        <AnimatedClosingMark />
       </section>
+
+      <footer className="apple-footer">
+        <div>
+          <strong>智模工坊</strong>
+          <p>面向工业设计的 AI 三维资产与图像方案生成平台。</p>
+        </div>
+        <nav aria-label="页脚产品">
+          <Link href="/model">三维模型生成</Link>
+          <Link href="/image">图像方案生成</Link>
+          <Link href="/login">登录</Link>
+        </nav>
+        <small>2026 智模工坊 All rights reserved</small>
+      </footer>
     </main>
   );
 }

@@ -29,6 +29,7 @@ Provider selection:
 - `MODEL_PROVIDER=mock`: simulated local generation.
 - `MODEL_PROVIDER=meshy`: calls Meshy Text-to-3D preview API and polls the vendor task until a model URL is available.
 - `MODEL_PROVIDER=hunyuan`: calls Tencent Cloud Hunyuan3D API 3.0 with TC3-HMAC-SHA256 signing.
+- `MODEL_PROVIDER=neural4d`: calls Neural4D text-to-3D API with a Bearer token, polls the returned UUID, and optionally converts the completed model to the requested export format.
 
 ## Future GPU Worker
 

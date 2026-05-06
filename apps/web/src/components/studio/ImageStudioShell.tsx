@@ -6,16 +6,66 @@ import {
   ArrowLeft,
   Download,
   Image as ImageIcon,
-  Play,
+  Maximize2,
+  RotateCcw,
   WandSparkles,
+  X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { API_BASE_URL, api } from "@/lib/api";
+import { getAuthHeaders } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 
 const aspectRatios: ImageAspectRatio[] = ["1:1", "16:9", "9:16", "4:3", "3:4"];
+
+const imageTypeCopy = {
+  home: {
+    label: "家居设计图",
+    hint: "空间方案、家具搭配与室内视觉图",
+    placeholder: "输入家居设计图描述，例如现代客厅空间，浅色沙发、木质茶几、自然光和高级软装",
+  },
+  stationery: {
+    label: "文具设计图",
+    hint: "文具产品外观、包装与桌面展示图",
+    placeholder: "输入文具设计图描述，例如一套极简办公文具，磨砂材质、蓝白配色、整齐摆放在桌面",
+  },
+  industrial: {
+    label: "工业模型图",
+    hint: "工业产品、设备外观与模型效果图",
+    placeholder: "输入工业模型图描述，例如一台智能检测设备的产品渲染图，金属外壳、屏幕、按钮和实验室背景",
+  },
+  poster: {
+    label: "文创海报",
+    hint: "文化创意、城市纪念与品牌活动海报",
+    placeholder: "输入文创海报描述，例如敦煌纹样主题文创海报，现代排版、暖金色调、丝路视觉元素",
+  },
+  painting: {
+    label: "艺术绘画",
+    hint: "插画、绘画风格与艺术视觉创作",
+    placeholder: "输入艺术绘画描述，例如一幅水彩风格的海边黄昏，柔和色彩、细腻笔触、安静氛围",
+  },
+};
+
+type ImageType = keyof typeof imageTypeCopy;
+
+function getImageType(value: string | null): ImageType {
+  if (
+    value === "home" ||
+    value === "stationery" ||
+    value === "industrial" ||
+    value === "poster" ||
+    value === "painting"
+  ) {
+    return value;
+  }
+
+  return "home";
+}
 
 function formatTime(value: string) {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -25,20 +75,41 @@ function formatTime(value: string) {
 }
 
 export function ImageStudioShell() {
+  const searchParams = useSearchParams();
+  const imageType = getImageType(searchParams.get("type"));
+  const currentImageType = imageTypeCopy[imageType];
   const [prompt, setPrompt] = useState("");
   const [aspectRatio, setAspectRatio] = useState<ImageAspectRatio>("1:1");
   const [jobs, setJobs] = useState<ImageJob[]>([]);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
-  const [preview, setPreview] = useState<{ jobId: string; url: string } | null>(
-    null,
-  );
+  const [preview, setPreview] = useState<{
+    jobId: string;
+    url: string;
+    blob: Blob;
+  } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
+  const [previewScale, setPreviewScale] = useState(1);
+  const [previewOffset, setPreviewOffset] = useState({ x: 0, y: 0 });
+  const previewDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const activeJob = useMemo(
     () => jobs.find((job) => job.id === activeJobId) ?? null,
     [activeJobId, jobs],
   );
+  const canDownload = activeJob?.status === "completed";
+  const hasFailed = activeJob?.status === "failed";
+  const previewUrl =
+    activeJob && preview?.jobId === activeJob.id ? preview.url : null;
+  const isPreviewLoading = Boolean(canDownload && !previewUrl && !error);
 
   useEffect(() => {
     api
@@ -48,7 +119,7 @@ export function ImageStudioShell() {
         setActiveJobId((current) => current ?? items[0]?.id ?? null);
       })
       .catch(() => {
-        setError(`图片 API 未连接，请确认 FastAPI 已在 ${API_BASE_URL} 启动。`);
+        setError(`图片 API 未连接，请确认 FastAPI 已在 ${API_BASE_URL} 启动`);
       });
   }, []);
 
@@ -61,46 +132,60 @@ export function ImageStudioShell() {
       return;
     }
 
-    const interval = window.setInterval(async () => {
+    let isMounted = true;
+
+    const refreshJob = async () => {
       try {
         const nextJob = await api.getImageJob(activeJob.id);
-        setJobs((items) =>
-          items.map((item) => (item.id === nextJob.id ? nextJob : item)),
-        );
+        if (isMounted) {
+          setJobs((items) =>
+            items.map((item) => (item.id === nextJob.id ? nextJob : item)),
+          );
+        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "图片任务轮询失败。");
+        setError(err instanceof Error ? err.message : "图片任务轮询失败");
       }
-    }, 900);
+    };
 
-    return () => window.clearInterval(interval);
+    void refreshJob();
+    const interval = window.setInterval(() => void refreshJob(), 700);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(interval);
+    };
   }, [activeJob]);
 
   useEffect(() => {
     if (!activeJob || activeJob.status !== "completed") {
       return;
     }
-
     let isMounted = true;
     let objectUrl: string | null = null;
 
-    fetch(`${api.imageUrl(activeJob.id)}?v=${encodeURIComponent(activeJob.updatedAt)}`)
+    getAuthHeaders()
+      .then((headers) =>
+        fetch(`${api.imageUrl(activeJob.id)}?v=${encodeURIComponent(activeJob.updatedAt)}`, {
+          headers,
+        }),
+      )
       .then((response) => {
         if (!response.ok) {
-          throw new Error(`图片加载失败：${response.status}`);
+          throw new Error(`图片加载失败 ${response.status}`);
         }
         return response.blob();
       })
       .then((blob) => {
         objectUrl = window.URL.createObjectURL(blob);
         if (isMounted) {
-          setPreview({ jobId: activeJob.id, url: objectUrl });
+          setPreview({ jobId: activeJob.id, url: objectUrl, blob });
         } else {
           window.URL.revokeObjectURL(objectUrl);
         }
       })
       .catch((err) => {
         if (isMounted) {
-          setError(err instanceof Error ? err.message : "图片加载失败。");
+          setError(err instanceof Error ? err.message : "图片加载失败");
         }
       });
 
@@ -111,6 +196,38 @@ export function ImageStudioShell() {
       }
     };
   }, [activeJob]);
+
+  useEffect(() => {
+    if (!isPreviewFullscreen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsPreviewFullscreen(false);
+      }
+    };
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isPreviewFullscreen]);
+
+  function saveImageBlob(blob: Blob, fileName: string) {
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 30_000);
+  }
 
   async function submitImageGeneration() {
     setError(null);
@@ -123,7 +240,7 @@ export function ImageStudioShell() {
       setJobs((items) => [job, ...items]);
       setActiveJobId(job.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "创建图片任务失败。");
+      setError(err instanceof Error ? err.message : "创建图片任务失败");
     } finally {
       setIsSubmitting(false);
     }
@@ -133,246 +250,357 @@ export function ImageStudioShell() {
     setActiveJobId(job.id);
     setPrompt(job.prompt);
     setAspectRatio(job.aspectRatio);
+    setIsPreviewFullscreen(false);
+    setPreviewScale(1);
+    setPreviewOffset({ x: 0, y: 0 });
   }
 
   async function downloadActiveImage() {
     if (!activeJob || activeJob.status !== "completed") return;
     setError(null);
+    setIsDownloading(true);
+    const fileName = `${activeJob.prompt.slice(0, 24) || "image"}.png`;
     try {
-      const response = await fetch(api.imageUrl(activeJob.id));
+      if (preview?.jobId === activeJob.id) {
+        saveImageBlob(preview.blob, fileName);
+        return;
+      }
+      const response = await fetch(api.imageUrl(activeJob.id), {
+        headers: await getAuthHeaders(),
+      });
       if (!response.ok) {
-        throw new Error(`图片下载失败：${response.status}`);
+        throw new Error(`图片下载失败 ${response.status}`);
       }
       const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${activeJob.prompt.slice(0, 24) || "image"}.png`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
+      saveImageBlob(blob, fileName);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "图片下载失败。");
+      setError(err instanceof Error ? err.message : "图片下载失败");
+    } finally {
+      setIsDownloading(false);
     }
   }
 
-  const canDownload = activeJob?.status === "completed";
-  const hasFailed = activeJob?.status === "failed";
-  const previewUrl =
-    activeJob && preview?.jobId === activeJob.id ? preview.url : null;
-  const isPreviewLoading = Boolean(canDownload && !previewUrl && !error);
+  function updatePreviewScale(nextScale: number) {
+    setPreviewScale(Math.min(6, Math.max(0.35, nextScale)));
+  }
+
+  function resetFullscreenPreview() {
+    setPreviewScale(1);
+    setPreviewOffset({ x: 0, y: 0 });
+  }
+
+  function handleFullscreenWheel(event: React.WheelEvent<HTMLDivElement>) {
+    event.preventDefault();
+    updatePreviewScale(previewScale + (event.deltaY > 0 ? -0.16 : 0.16));
+  }
+
+  function handlePreviewPointerDown(event: React.PointerEvent<HTMLImageElement>) {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    previewDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: previewOffset.x,
+      originY: previewOffset.y,
+    };
+  }
+
+  function handlePreviewPointerMove(event: React.PointerEvent<HTMLImageElement>) {
+    const drag = previewDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    setPreviewOffset({
+      x: drag.originX + event.clientX - drag.startX,
+      y: drag.originY + event.clientY - drag.startY,
+    });
+  }
+
+  function handlePreviewPointerUp(event: React.PointerEvent<HTMLImageElement>) {
+    if (previewDragRef.current?.pointerId === event.pointerId) {
+      previewDragRef.current = null;
+    }
+    event.currentTarget.releasePointerCapture(event.pointerId);
+  }
 
   return (
-    <main className="min-h-screen bg-[#ece7dc] text-[#171817]">
-      <header className="relative z-50 flex items-center justify-between border-b border-black/10 bg-[#f7f2e8]/85 px-4 py-3 backdrop-blur md:px-6">
-        <div className="flex items-center gap-3">
-          <Link
-            href="/"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-md hover:bg-black/[0.05]"
-            aria-label="返回首页"
-          >
-            <ArrowLeft size={19} />
+    <main className="studio-workspace studio-workspace--image">
+      <header className="studio-workspace-topbar">
+        <div className="studio-topbar-left">
+          <Link href="/" className="studio-back-button" aria-label="返回首页">
+            <ArrowLeft size={20} />
           </Link>
           <div>
-            <p className="font-bold">图片生成工作台</p>
-            <p className="text-xs text-[#656057]">
-              SiliconFlow 文生图、预览与下载
-            </p>
+            <p>{currentImageType.label}工作台</p>
+            <span>{currentImageType.hint} · 提示词、比例、预览、历史下载</span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <StatusBadge status={activeJob?.status ?? "queued"} />
+        <div className="studio-topbar-actions">
+          {activeJob ? (
+            <StatusBadge status={activeJob.status} />
+          ) : (
+            <span className="studio-ready-pill">就绪</span>
+          )}
           <Button
             variant="dark"
-            disabled={!canDownload}
+            disabled={!canDownload || isDownloading}
             onClick={() => void downloadActiveImage()}
+            title={canDownload ? "下载当前图片" : "图片完成后可下载"}
+            aria-busy={isDownloading}
           >
             <Download size={16} />
-            下载图片
+            <span className="hidden sm:inline">下载图片</span>
+            <span className="sm:hidden">下载</span>
           </Button>
         </div>
       </header>
 
-      <section className="grid min-h-[calc(100vh-65px)] gap-3 p-3 lg:grid-cols-[390px_1fr]">
-        <aside className="surface flex min-h-[620px] flex-col rounded-lg p-4">
-          <div className="mb-4 flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-md bg-[#202421] text-[#f7f1e7]">
-              <ImageIcon size={17} />
+      <section className="studio-workspace-grid">
+        <aside className="studio-glass-panel studio-input-panel">
+          <div className="studio-panel-heading">
+            <span>
+              <ImageIcon size={18} />
             </span>
             <div>
-              <h1 className="font-bold">图片提示词</h1>
-              <p className="text-xs text-[#656057]">文本生成可预览图片</p>
+              <h1>生成输入</h1>
+              <p>提示词与图片比例会发送给后端</p>
             </div>
           </div>
 
-          <div className="mb-4 flex-1 space-y-3 overflow-auto rounded-lg border border-black/10 bg-white/50 p-3">
-            <div className="rounded-lg bg-[#202421] p-3 text-sm leading-6 text-[#f7f1e7]">
-              描述主体、场景、风格和构图。图片会由后端代理加载，避免浏览器跨域或重定向问题。
-            </div>
-            {activeJob && (
-              <div className="rounded-lg bg-[#20766f]/10 p-3 text-sm leading-6 text-[#1b514c]">
-                {activeJob.prompt}
-                <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/10">
-                  <div
-                    className="h-full rounded-full bg-[#20766f] transition-all"
-                    style={{ width: `${activeJob.progress}%` }}
-                  />
-                </div>
-                {activeJob.error && (
-                  <p className="mt-2 text-xs text-red-700">{activeJob.error}</p>
-                )}
-              </div>
-            )}
-          </div>
+          <textarea
+            className="studio-textarea"
+            placeholder={currentImageType.placeholder}
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+          />
 
-          <div className="space-y-3">
-            <textarea
-              className="min-h-28 w-full resize-none rounded-md border border-black/10 bg-white/70 p-3 text-sm leading-6 outline-none transition focus:border-[#20766f]"
-              placeholder="请输入图片描述，例如：一个人在雨后的城市街道行走，电影感摄影，柔和霓虹光。"
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
+          <label className="studio-field-label" htmlFor="image-aspect-ratio">
+            图片比例
+          </label>
+          <select
+            id="image-aspect-ratio"
+            className="studio-select"
+            value={aspectRatio}
+            onChange={(event) =>
+              setAspectRatio(event.target.value as ImageAspectRatio)
+            }
+          >
+            {aspectRatios.map((ratio) => (
+              <option value={ratio} key={ratio}>
+                {ratio}
+              </option>
+            ))}
+          </select>
+
+          {error && (
+            <div className="studio-error">
+              <AlertCircle size={16} />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <Button
+            className="studio-primary-action"
+            disabled={isSubmitting || prompt.trim().length === 0}
+            onClick={() => void submitImageGeneration()}
+            aria-busy={isSubmitting}
+          >
+            <WandSparkles
+              className={isSubmitting ? "animate-pulse" : undefined}
+              size={16}
             />
-            <select
-              className="h-10 w-full rounded-md border border-black/10 bg-white/70 px-3 text-sm font-semibold outline-none transition focus:border-[#20766f]"
-              value={aspectRatio}
-              onChange={(event) =>
-                setAspectRatio(event.target.value as ImageAspectRatio)
-              }
-              aria-label="图片比例"
-            >
-              {aspectRatios.map((ratio) => (
-                <option value={ratio} key={ratio}>
-                  图片比例 {ratio}
-                </option>
-              ))}
-            </select>
-            <div className="rounded-md border border-[#20766f]/20 bg-[#20766f]/10 px-3 py-2 text-xs font-semibold text-[#1b514c]">
-              当前模式：文本生成图片
-            </div>
-            {error && (
-              <div className="flex items-start gap-2 rounded-md bg-red-600/10 p-3 text-sm text-red-700">
-                <AlertCircle className="mt-0.5 shrink-0" size={16} />
-                {error}
+            生成图片
+          </Button>
+
+          {activeJob && (
+            <div className="studio-current-card">
+              <div>
+                <span>当前任务</span>
+                <StatusBadge status={activeJob.status} />
               </div>
-            )}
-            <Button
-              className="w-full"
-              disabled={isSubmitting || prompt.trim().length === 0}
-              onClick={() => void submitImageGeneration()}
-              aria-busy={isSubmitting}
-            >
-              <WandSparkles
-                className={isSubmitting ? "animate-pulse" : undefined}
-                size={16}
-              />
-              生成图片
-            </Button>
-          </div>
+              <p>{activeJob.prompt}</p>
+              <small>比例 {activeJob.aspectRatio}</small>
+              <div className="studio-progress">
+                <i style={{ width: `${activeJob.progress}%` }} />
+              </div>
+              {activeJob.error && <small>{activeJob.error}</small>}
+            </div>
+          )}
         </aside>
 
-        <section className="grid gap-3 lg:grid-rows-[1fr_auto]">
-          <div className="dark-surface rounded-lg p-3">
-            <div className="relative flex h-full min-h-[520px] items-center justify-center overflow-hidden rounded-lg bg-[#151815]">
-              <div className="absolute inset-0 subtle-grid opacity-20" />
-              {previewUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={previewUrl}
-                  alt={activeJob?.prompt ?? "生成图片"}
-                  className="relative z-10 max-h-full max-w-full rounded-md object-contain shadow-2xl shadow-black/40"
-                />
-              ) : (
-                <div className="relative z-10 flex max-w-sm flex-col items-center gap-4 text-center text-[#f7f1e7]">
-                  <span className="inline-flex h-16 w-16 items-center justify-center rounded-md border border-white/10 bg-white/10">
-                    <ImageIcon size={28} />
-                  </span>
-                  <div>
-                    <p className="text-lg font-bold">
-                      {isPreviewLoading
-                        ? "图片正在加载"
-                        : hasFailed
-                          ? "图片生成失败"
-                          : activeJob
+        <section className="studio-preview-panel">
+          <div className="image-preview-canvas">
+            <div className="image-preview-grid" />
+            {previewUrl ? (
+              <div className="image-preview-tools">
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetFullscreenPreview();
+                    setIsPreviewFullscreen(true);
+                  }}
+                  aria-label="全屏预览"
+                  title="全屏预览"
+                >
+                  <Maximize2 size={17} />
+                </button>
+              </div>
+            ) : null}
+            {previewUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={previewUrl}
+                alt={activeJob?.prompt ?? "生成图片"}
+                className="image-preview-result"
+                decoding="async"
+              />
+            ) : (
+              <div className="image-preview-empty">
+                <span>
+                  {isPreviewLoading ? (
+                    <WandSparkles className="animate-pulse" size={30} />
+                  ) : (
+                    <ImageIcon size={30} />
+                  )}
+                </span>
+                <div>
+                  <p>
+                    {isPreviewLoading
+                      ? "图片文件加载中"
+                      : hasFailed
+                        ? "图片生成失败"
+                        : activeJob
                           ? "图片正在生成"
                           : "等待图片提示词"}
-                    </p>
-                    <p className="mt-2 text-sm leading-6 text-white/62">
-                      {hasFailed
-                        ? activeJob?.error || "请调整提示词或稍后重试。"
-                        : "完成后，生成图会在这里完整预览。"}
-                    </p>
-                  </div>
+                  </p>
+                  <small>
+                    {isPreviewLoading
+                      ? "任务已完成，正在下载图片文件"
+                      : hasFailed
+                        ? activeJob?.error || "请调整提示词后重试"
+                        : activeJob
+                          ? `当前进度 ${activeJob.progress}%`
+                          : "完成后生成图会在这里预览"}
+                  </small>
                 </div>
-              )}
-              <div className="absolute right-4 top-4 z-20 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold text-white/85">
-                {previewUrl
-                  ? "图片预览"
-                  : hasFailed
-                    ? "失败"
-                    : activeJob
-                      ? "正在生成"
-                      : "就绪"}
               </div>
+            )}
+            <div className="studio-preview-state">
+              {previewUrl
+                ? "图片预览"
+                : hasFailed
+                  ? "失败"
+                  : activeJob
+                    ? "正在生成"
+                    : "就绪"}
+            </div>
+          </div>
+        </section>
+
+        <aside className="studio-glass-panel studio-history-panel">
+          <div className="studio-panel-heading">
+            <span>
+              <ImageIcon size={18} />
+            </span>
+            <div>
+              <h2>图片历史</h2>
+              <p>点击历史项恢复提示词和预览</p>
             </div>
           </div>
 
-          <section className="surface rounded-lg p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <h2 className="font-bold">图片生成历史</h2>
-                <p className="text-xs text-[#656057]">
-                  选择任意版本，可恢复对应提示词和预览状态。
-                </p>
-              </div>
-              <Button
-                variant="secondary"
-                disabled={prompt.trim().length === 0}
-                onClick={() => void submitImageGeneration()}
-              >
-                <Play size={15} />
-                再生成一次
-              </Button>
+          {jobs.length === 0 ? (
+            <div className="studio-empty-state">
+              暂无图片任务，请先输入提示词并生成图片
             </div>
-
-            {jobs.length === 0 ? (
-              <div className="rounded-md border border-dashed border-black/15 p-4 text-sm text-[#656057]">
-                暂无图片任务。请先输入提示词并开始生成。
-              </div>
-            ) : (
-              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                {jobs.map((job) => (
-                  <button
-                    className={`rounded-md border p-3 text-left transition ${
-                      job.id === activeJobId
-                        ? "border-[#20766f] bg-[#20766f]/10"
-                        : "border-black/10 bg-white/55 hover:bg-white"
-                    }`}
-                    key={job.id}
-                    onClick={() => selectJob(job)}
-                  >
-                    <div className="mb-3 flex items-center justify-between gap-2">
-                      <StatusBadge status={job.status} />
-                      <span className="text-xs text-[#656057]">
-                        {formatTime(job.createdAt)}
-                      </span>
-                    </div>
-                    <p className="line-clamp-2 text-sm font-semibold leading-5">
-                      {job.prompt}
-                    </p>
-                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-black/10">
-                      <span
-                        className="block h-full rounded-full bg-[#20766f]"
-                        style={{ width: `${job.progress}%` }}
-                      />
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </section>
-        </section>
+          ) : (
+            <div className="studio-history-list">
+              {jobs.map((job) => (
+                <button
+                  className={job.id === activeJobId ? "is-active" : undefined}
+                  key={job.id}
+                  onClick={() => selectJob(job)}
+                >
+                  <div>
+                    <StatusBadge status={job.status} />
+                    <span>{formatTime(job.createdAt)}</span>
+                  </div>
+                  <p>{job.prompt}</p>
+                  <div className="studio-history-meta">
+                    <span>{job.aspectRatio}</span>
+                    <span>{job.progress}%</span>
+                  </div>
+                  <div className="studio-progress">
+                    <i style={{ width: `${job.progress}%` }} />
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </aside>
       </section>
+
+      {isPreviewFullscreen && previewUrl ? (
+        <div
+          className="image-fullscreen-preview"
+          role="dialog"
+          aria-modal="true"
+          aria-label="全屏图片预览"
+          onWheel={handleFullscreenWheel}
+        >
+          <div className="image-fullscreen-tools">
+            <button
+              type="button"
+              onClick={() => updatePreviewScale(previewScale - 0.25)}
+              aria-label="缩小"
+              title="缩小"
+            >
+              <ZoomOut size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => updatePreviewScale(previewScale + 0.25)}
+              aria-label="放大"
+              title="放大"
+            >
+              <ZoomIn size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={resetFullscreenPreview}
+              aria-label="重置视图"
+              title="重置视图"
+            >
+              <RotateCcw size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsPreviewFullscreen(false)}
+              aria-label="关闭全屏预览"
+              title="关闭"
+            >
+              <X size={18} />
+            </button>
+          </div>
+          <div className="image-fullscreen-stage">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={previewUrl}
+              alt={activeJob?.prompt ?? "生成图片"}
+              className="image-fullscreen-result"
+              decoding="async"
+              draggable={false}
+              onPointerDown={handlePreviewPointerDown}
+              onPointerMove={handlePreviewPointerMove}
+              onPointerUp={handlePreviewPointerUp}
+              onPointerCancel={handlePreviewPointerUp}
+              style={{
+                transform: `translate(${previewOffset.x}px, ${previewOffset.y}px) scale(${previewScale})`,
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

@@ -48,6 +48,45 @@ class HunyuanConfigTests(unittest.TestCase):
         self.assertEqual(config.version, "2023-09-01")
         self.assertEqual(config.region, "ap-singapore")
 
+    def test_hunyuan_uses_configured_standard_actions(self):
+        with test_env():
+            api = load_api()
+            request = api.CreateJobRequest(
+                prompt="Generate a ceramic mug",
+                mode="text-to-3d",
+                quality="balanced",
+                style="game-ready",
+                targetFormat="glb",
+            )
+
+            with patch.object(
+                api,
+                "call_tencent_ai3d",
+                return_value={"JobId": "job-1"},
+            ) as submit:
+                task_id = api.create_hunyuan_task(request)
+
+            with patch.object(
+                api,
+                "call_tencent_ai3d",
+                return_value={"Status": "DONE"},
+            ) as query:
+                task = api.query_hunyuan_task("job-1")
+
+        self.assertEqual(task_id, "job-1")
+        self.assertEqual(submit.call_args.args[0], "SubmitHunyuanTo3DJob")
+        self.assertEqual(
+            submit.call_args.args[1],
+            {
+                "Prompt": "Generate a ceramic mug",
+                "ResultFormat": "GLB",
+                "EnablePBR": True,
+            },
+        )
+        self.assertEqual(task, {"Status": "DONE"})
+        self.assertEqual(query.call_args.args[0], "QueryHunyuanTo3DJob")
+        self.assertEqual(query.call_args.args[1], {"JobId": "job-1"})
+
 
 class ImageProviderTests(unittest.TestCase):
     def test_image_size_maps_aspect_ratio(self):

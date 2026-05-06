@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 900">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#eff6ff"/>
+      <stop offset="0.5" stop-color="#f8fafc"/>
+      <stop offset="1" stop-color="#e0e7ff"/>
+    </linearGradient>
+    <linearGradient id="hood" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#020617"/>
+      <stop offset="1" stop-color="#334155"/>
+    </linearGradient>
+  </defs>
+  <rect width="900" height="900" fill="url(#bg)"/>
+  <circle cx="450" cy="286" r="136" fill="#efc2a4"/>
+  <path d="M300 285c2-94 62-170 152-176 91-6 157 56 168 148-60 6-112-7-156-40-39 46-94 69-164 68z" fill="#0f172a"/>
+  <path d="M174 846c26-224 134-352 276-352s250 128 276 352z" fill="url(#hood)"/>
+  <path d="M350 542c29 46 62 69 100 69s71-23 100-69v146H350z" fill="#efc2a4"/>
+  <circle cx="397" cy="316" r="13" fill="#020617"/>
+  <circle cx="503" cy="316" r="13" fill="#020617"/>
+  <path d="M395 386c36 22 74 22 110 0" fill="none" stroke="#020617" stroke-linecap="round" stroke-width="16"/>
+  <circle cx="690" cy="646" r="128" fill="#93c5fd" opacity=".18"/>
+  <circle cx="230" cy="200" r="72" fill="#ffffff" opacity=".44"/>
+</svg>

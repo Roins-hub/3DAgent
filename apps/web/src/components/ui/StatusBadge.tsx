@@ -3,7 +3,7 @@ import type { JobStatus } from "@3dagent/shared";
 const labels: Record<JobStatus, string> = {
   queued: "排队中",
   running: "生成中",
-  postprocessing: "后处理",
+  postprocessing: "处理中",
   completed: "已完成",
   failed: "失败",
 };
@@ -19,7 +19,7 @@ const styles: Record<JobStatus, string> = {
 export function StatusBadge({ status }: { status: JobStatus }) {
   return (
     <span
-      className={`inline-flex h-7 items-center rounded-full px-2.5 text-xs font-semibold ${styles[status]}`}
+      className={`inline-flex h-7 shrink-0 items-center whitespace-nowrap rounded-full px-2.5 text-xs font-semibold ${styles[status]}`}
     >
       {labels[status]}
     </span>

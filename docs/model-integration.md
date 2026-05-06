@@ -34,7 +34,7 @@ Current limitation: only `mode=text-to-3d` is supported for Meshy in this MVP. I
 
 Set `MODEL_PROVIDER=hunyuan`, `TENCENTCLOUD_SECRET_ID`, `TENCENTCLOUD_SECRET_KEY`, and optional `TENCENTCLOUD_REGION` in `apps/api/.env`.
 
-The provider uses Tencent Cloud API 3.0 signing against `ai3d.tencentcloudapi.com` and the `2025-05-13` API version. The MVP submits `SubmitHunyuanTo3DRapidJob` with:
+The provider uses Tencent Cloud API 3.0 signing against `ai3d.tencentcloudapi.com` and the `2025-05-13` API version. The MVP submits `SubmitHunyuanTo3DJob` with:
 
 ```json
 {
@@ -44,7 +44,30 @@ The provider uses Tencent Cloud API 3.0 signing against `ai3d.tencentcloudapi.co
 }
 ```
 
-Then it polls `QueryHunyuanTo3DRapidJob` using the returned `JobId`. When a model URL is available in `ResultFile3Ds`, it is written to the local job's `modelUrl`.
+Then it polls `QueryHunyuanTo3DJob` using the returned `JobId`. When a model URL is available in `ResultFile3Ds`, it is written to the local job's `modelUrl`.
+
+## Neural4D API Provider
+
+Set `MODEL_PROVIDER=neural4d` and `NEURAL4D_API_TOKEN` in `apps/api/.env`.
+
+Optional Neural4D settings:
+
+```env
+NEURAL4D_BASE_URL=https://alb.neural4d.com:3000/api
+NEURAL4D_MODEL_COUNT=1
+```
+
+The provider uses Neural4D's text-to-3D workflow:
+
+1. `POST /api/jobs` creates a local job.
+2. The backend submits `generateModelWithText` with `prompt`, `modelCount`, and `disablePbr=0`.
+3. The backend stores the first returned Neural4D UUID as `metadata.providerTaskId`.
+4. The backend polls `queryJobProgress` and `retrieveModel`.
+5. When `retrieveModel` returns `codeStatus=0`, the local job is marked `completed` and `modelUrl` is set from Neural4D's returned URL.
+
+For `targetFormat=fbx` or `targetFormat=obj`, the provider calls `convertToFormat` after generation completes and keeps the local job in `postprocessing` while Neural4D converts the model. `targetFormat=glb` uses the model URL returned by `retrieveModel` directly.
+
+Current limitation: only `mode=text-to-3d` is supported for Neural4D in this app. Neural4D image-to-3D requires the matting-image flow and upload handling, which should be added as a separate path.
 
 ## Replace With Hunyuan3D-2
 

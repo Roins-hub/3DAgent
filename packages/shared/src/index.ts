@@ -7,7 +7,7 @@ export type JobStatus =
   | "completed"
   | "failed";
 
-export type TargetFormat = "glb" | "fbx" | "obj";
+export type TargetFormat = "glb" | "fbx" | "obj" | "stl";
 
 export type GenerationQuality = "draft" | "balanced" | "production";
 
