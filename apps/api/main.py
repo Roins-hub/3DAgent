@@ -86,6 +86,11 @@ def load_env_file(path: Path) -> None:
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
+def comma_separated_env(name: str) -> list[str]:
+    raw_value = os.environ.get(name, "")
+    return [item.strip() for item in raw_value.split(",") if item.strip()]
+
+
 ROOT_DIR = Path(__file__).resolve().parents[2]
 API_ENV_PATH = Path(__file__).resolve().parent / ".env"
 load_env_file(ROOT_DIR / ".env")
@@ -255,7 +260,7 @@ app = FastAPI(title="鏅烘ā宸ュ潑 API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[],
+    allow_origins=comma_separated_env("ADMIN_ALLOWED_ORIGINS"),
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
     allow_credentials=True,
     allow_methods=["*"],

@@ -44,6 +44,21 @@ def auth_user(email="admin@example.com"):
 
 
 class AdminApiTests(unittest.TestCase):
+    def test_admin_allowed_origins_are_loaded_from_env(self):
+        with test_env({"ADMIN_ALLOWED_ORIGINS": "https://admin.hhlai.xyz, https://ops.hhlai.xyz"}):
+            api = load_api()
+
+        cors_middleware = next(
+            middleware
+            for middleware in api.app.user_middleware
+            if middleware.cls.__name__ == "CORSMiddleware"
+        )
+
+        self.assertEqual(
+            cors_middleware.kwargs["allow_origins"],
+            ["https://admin.hhlai.xyz", "https://ops.hhlai.xyz"],
+        )
+
     def test_admin_user_requires_allowlisted_email(self):
         with test_env():
             api = load_api()
