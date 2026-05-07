@@ -236,6 +236,100 @@ class HistoryPersistenceTests(unittest.TestCase):
         self.assertEqual(get.call_count, 1)
         self.assertEqual(first.path, second.path)
 
+    def test_local_image_missing_returns_gone_instead_of_404(self):
+        with test_env():
+            api = load_api()
+            row = {
+                "id": "99999999-9999-9999-9999-999999999999",
+                "user_id": "user-1",
+                "kind": "image",
+                "prompt": "Generate a product render",
+                "mode": None,
+                "status": "completed",
+                "progress": 100,
+                "quality": None,
+                "style": None,
+                "target_format": None,
+                "aspect_ratio": "1:1",
+                "result_url": "local://image-jobs/99999999-9999-9999-9999-999999999999/image",
+                "thumbnail_url": None,
+                "error": None,
+                "metadata": None,
+                "created_at": "2026-04-28T00:00:00+00:00",
+                "updated_at": "2026-04-28T00:01:00+00:00",
+            }
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                api.IMAGE_CACHE_DIR = api.Path(temp_dir) / "generated"
+                api.LEGACY_IMAGE_CACHE_DIR = api.Path(temp_dir) / "legacy"
+                with (
+                    patch.object(api, "verify_supabase_user", return_value=api.AuthUser(id="user-1")),
+                    patch.object(api, "get_history_row", return_value=row),
+                ):
+                    with self.assertRaises(api.HTTPException) as raised:
+                        asyncio.run(api.get_image_job_image(row["id"], "Bearer test-token"))
+
+        self.assertEqual(raised.exception.status_code, 410)
+
+    def test_storage_image_download_uses_disk_cache(self):
+        with test_env():
+            api = load_api()
+            job = api.ImageJob(
+                id="12121212-1212-1212-1212-121212121212",
+                prompt="Generate a preview",
+                status="completed",
+                progress=100,
+                aspectRatio="1:1",
+                createdAt="2026-04-28T00:00:00+00:00",
+                updatedAt="2026-04-28T00:00:00+00:00",
+                imageUrl=api.storage_image_url("12121212-1212-1212-1212-121212121212"),
+                error=None,
+            )
+            response = response_mock({}, 200)
+            response.iter_content.return_value = [b"png-bytes"]
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                api.IMAGE_CACHE_DIR = api.Path(temp_dir) / "generated"
+                api.LEGACY_IMAGE_CACHE_DIR = api.Path(temp_dir) / "legacy"
+                with patch.object(api.requests, "get", return_value=response) as get:
+                    first = api.download_storage_image(job)
+                    second = api.download_storage_image(job)
+
+        self.assertEqual(get.call_count, 1)
+        self.assertEqual(first, second)
+
+    def test_mock_image_generation_writes_local_file(self):
+        with test_env():
+            api = load_api()
+            job = api.ImageJob(
+                id="10101010-1010-1010-1010-101010101010",
+                prompt="Generate a preview",
+                status="queued",
+                progress=0,
+                aspectRatio="1:1",
+                createdAt="2026-04-28T00:00:00+00:00",
+                updatedAt="2026-04-28T00:00:00+00:00",
+                imageUrl=None,
+                error=None,
+            )
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                api.IMAGE_CACHE_DIR = api.Path(temp_dir) / "generated"
+                api.image_jobs[job.id] = job
+                with (
+                    patch.object(api, "persist_image_job_update"),
+                    patch.object(api, "upload_generated_image", return_value=api.storage_image_url(job.id)),
+                ):
+                    asyncio.run(api.simulate_image_generation(job.id))
+
+                image_path = api.image_cache_path(job.id)
+                updated = api.image_jobs[job.id]
+                image_exists = image_path.exists()
+
+        self.assertTrue(image_exists)
+        self.assertEqual(updated.status, "completed")
+        self.assertEqual(updated.imageUrl, f"supabase-storage://generation-assets/image-jobs/{job.id}.png")
+
     def test_estimated_image_progress_advances_without_reaching_completion(self):
         with test_env():
             api = load_api()

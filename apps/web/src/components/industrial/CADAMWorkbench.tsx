@@ -340,10 +340,19 @@ export function CADAMWorkbench() {
 
       setSpec(nextSpec);
       const stableScad = scadForSpec(nextSpec);
-      setCode(stableScad);
+      const aiScad = typeof result.scad === "string" ? result.scad : "";
+      const candidateScad = looksLikeScad(aiScad) ? aiScad : stableScad;
+      setCode(candidateScad);
       setGeneratorMeta(`${result.provider.toUpperCase()} · ${result.model} · 参数化内核`);
-      await compileScad(stableScad);
-      setCompileNote("AI 已用于识别意图和参数，几何由稳定参数化 CAD 内核生成，确保可编译和可导出 STL。");
+      const compiled = await compileScad(candidateScad);
+      if (!compiled && candidateScad !== stableScad) {
+        setCode(stableScad);
+        setGeneratorMeta(`${result.provider.toUpperCase()} · ${result.model} · 已回退本地内核`);
+        await compileScad(stableScad);
+        setCompileNote("AI 已返回 OpenSCAD，但该代码未通过本地 WASM 编译，已回退到同参数的稳定 CAD 内核。");
+      } else {
+        setCompileNote("AI 已生成参数化 OpenSCAD，并已通过本地 WASM 编译，可预览和导出 STL。");
+      }
     } catch (generateError) {
       const fallbackSpec = inferSpec(prompt, spec);
       const stableScad = scadForSpec(fallbackSpec);

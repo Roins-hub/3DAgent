@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import type { ImageAspectRatio, ImageJob } from "@3dagent/shared";
 import {
@@ -27,27 +27,32 @@ const imageTypeCopy = {
   home: {
     label: "家居设计图",
     hint: "空间方案、家具搭配与室内视觉图",
-    placeholder: "输入家居设计图描述，例如现代客厅空间，浅色沙发、木质茶几、自然光和高级软装",
+    placeholder:
+      "输入家居设计图描述，例如现代客厅空间，浅色沙发、木质茶几、自然光和高级软装",
   },
   stationery: {
     label: "文具设计图",
     hint: "文具产品外观、包装与桌面展示图",
-    placeholder: "输入文具设计图描述，例如一套极简办公文具，磨砂材质、蓝白配色、整齐摆放在桌面",
+    placeholder:
+      "输入文具设计图描述，例如一套极简办公文具，磨砂材质、蓝白配色、整齐摆放在桌面",
   },
   industrial: {
     label: "工业模型图",
     hint: "工业产品、设备外观与模型效果图",
-    placeholder: "输入工业模型图描述，例如一台智能检测设备的产品渲染图，金属外壳、屏幕、按钮和实验室背景",
+    placeholder:
+      "输入工业模型图描述，例如一台智能检测设备的产品渲染图，金属外壳、屏幕、按钮和实验室背景",
   },
   poster: {
     label: "文创海报",
     hint: "文化创意、城市纪念与品牌活动海报",
-    placeholder: "输入文创海报描述，例如敦煌纹样主题文创海报，现代排版、暖金色调、丝路视觉元素",
+    placeholder:
+      "输入文创海报描述，例如敦煌纹样主题文创海报，现代排版、暖金色调、丝路视觉元素",
   },
   painting: {
     label: "艺术绘画",
     hint: "插画、绘画风格与艺术视觉创作",
-    placeholder: "输入艺术绘画描述，例如一幅水彩风格的海边黄昏，柔和色彩、细腻笔触、安静氛围",
+    placeholder:
+      "输入艺术绘画描述，例如一幅水彩风格的海边黄昏，柔和色彩、细腻笔触、安静氛围",
   },
 };
 
@@ -105,11 +110,13 @@ export function ImageStudioShell() {
     () => jobs.find((job) => job.id === activeJobId) ?? null,
     [activeJobId, jobs],
   );
-  const canDownload = activeJob?.status === "completed";
+  const isCompleted = activeJob?.status === "completed";
   const hasFailed = activeJob?.status === "failed";
   const previewUrl =
     activeJob && preview?.jobId === activeJob.id ? preview.url : null;
-  const isPreviewLoading = Boolean(canDownload && !previewUrl && !error);
+  const hasPreviewError = Boolean(isCompleted && error && !previewUrl);
+  const canDownload = Boolean(isCompleted && !hasPreviewError);
+  const isPreviewLoading = Boolean(isCompleted && !previewUrl && !error);
 
   useEffect(() => {
     api
@@ -118,8 +125,8 @@ export function ImageStudioShell() {
         setJobs(items);
         setActiveJobId((current) => current ?? items[0]?.id ?? null);
       })
-      .catch(() => {
-        setError(`图片 API 未连接，请确认 FastAPI 已在 ${API_BASE_URL} 启动`);
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : `历史记录加载失败，请确认后端 ${API_BASE_URL} 可访问`);
       });
   }, []);
 
@@ -169,9 +176,18 @@ export function ImageStudioShell() {
           headers,
         }),
       )
-      .then((response) => {
+      .then(async (response) => {
         if (!response.ok) {
-          throw new Error(`图片加载失败 ${response.status}`);
+          const body = await response.json().catch(() => null);
+          const detail =
+            typeof body?.detail === "string"
+              ? body.detail
+              : `图片加载失败 ${response.status}`;
+          throw new Error(
+            response.status === 410
+              ? "图片文件缺失，请重新生成或在后台重试这条记录。"
+              : detail,
+          );
         }
         return response.blob();
       })
@@ -468,20 +484,24 @@ export function ImageStudioShell() {
                   <p>
                     {isPreviewLoading
                       ? "图片文件加载中"
-                      : hasFailed
-                        ? "图片生成失败"
-                        : activeJob
-                          ? "图片正在生成"
-                          : "等待图片提示词"}
+                      : hasPreviewError
+                        ? "图片文件缺失"
+                        : hasFailed
+                          ? "图片生成失败"
+                          : activeJob
+                            ? "图片正在生成"
+                            : "等待图片提示词"}
                   </p>
                   <small>
                     {isPreviewLoading
                       ? "任务已完成，正在下载图片文件"
-                      : hasFailed
-                        ? activeJob?.error || "请调整提示词后重试"
-                        : activeJob
-                          ? `当前进度 ${activeJob.progress}%`
-                          : "完成后生成图会在这里预览"}
+                      : hasPreviewError
+                        ? error
+                        : hasFailed
+                          ? activeJob?.error || "请调整提示词后重试"
+                          : activeJob
+                            ? `当前进度 ${activeJob.progress}%`
+                            : "完成后生成图会在这里预览"}
                   </small>
                 </div>
               </div>
@@ -489,11 +509,13 @@ export function ImageStudioShell() {
             <div className="studio-preview-state">
               {previewUrl
                 ? "图片预览"
-                : hasFailed
-                  ? "失败"
-                  : activeJob
-                    ? "正在生成"
-                    : "就绪"}
+                : hasPreviewError
+                  ? "文件缺失"
+                  : hasFailed
+                    ? "失败"
+                    : activeJob
+                      ? "正在生成"
+                      : "就绪"}
             </div>
           </div>
         </section>

@@ -3,6 +3,8 @@ node_modules
 .next
 out
 dist
+*.tsbuildinfo
+apps/api/generated
 .env
 .env.local
 SecretKey.csv

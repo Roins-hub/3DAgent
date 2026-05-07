@@ -32,7 +32,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
             <span>
               <Sparkles className="size-5" />
             </span>
-            <strong>智模工坊</strong>
+            <strong>智模精工</strong>
           </Link>
 
           <div className="auth-required-lock">

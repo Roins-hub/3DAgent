@@ -1,37 +1,49 @@
 import { Header } from "@/components/ui/header-2";
-import { AuroraBackground } from "@/components/ui/aurora-background";
-import { CircularRevealHeading } from "@/components/ui/circular-reveal-heading";
+import {
+  InteractiveSelector,
+  type InteractiveSelectorOption,
+} from "@/components/ui/interactive-selector";
 
-const imageTypes = [
+const imageTypes: InteractiveSelectorOption[] = [
   {
+    title: "家居设计图",
+    description: "室内空间、软装搭配与家居场景方案",
     href: "/image/workspace?type=home",
-    text: "家居设计图",
     image:
       "https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&w=900&q=80",
+    icon: "armchair",
   },
   {
+    title: "文具设计图",
+    description: "办公用品、学习工具与文具产品视觉",
     href: "/image/workspace?type=stationery",
-    text: "文具设计图",
     image:
       "https://images.unsplash.com/photo-1455390582262-044cdead277a?auto=format&fit=crop&w=900&q=80",
+    icon: "pen",
   },
   {
+    title: "工业模型图",
+    description: "工业产品、设备外观与机械结构概念图",
     href: "/image/workspace?type=industrial",
-    text: "工业模型图",
     image:
       "https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=900&q=80",
+    icon: "factory",
   },
   {
+    title: "文创海报",
+    description: "品牌活动、IP 宣发与文化创意海报",
     href: "/image/workspace?type=poster",
-    text: "文创海报",
     image:
       "https://images.unsplash.com/photo-1541961017774-22349e4a1262?auto=format&fit=crop&w=900&q=80",
+    icon: "file-image",
   },
   {
+    title: "艺术绘画",
+    description: "插画风格、艺术实验与视觉表达探索",
     href: "/image/workspace?type=painting",
-    text: "艺术绘画",
     image:
       "https://images.unsplash.com/photo-1513364776144-60967b0f800f?auto=format&fit=crop&w=900&q=80",
+    icon: "palette",
   },
 ];
 
@@ -39,25 +51,13 @@ export default function ImageGatewayPage() {
   return (
     <main className="model-gateway image-gateway">
       <Header />
-      <AuroraBackground className="model-gateway-hero" aria-labelledby="image-gateway-title">
-        <div className="model-gateway-copy">
-          <p>图片生成大厅</p>
-          <h1 id="image-gateway-title">选择图片生成类型</h1>
-        </div>
-
-        <div className="model-gateway-stage">
-          <CircularRevealHeading
-            items={imageTypes}
-            centerText={
-              <div className="model-gateway-center">
-                <strong>图片生成</strong>
-                <span>选择下方类型</span>
-              </div>
-            }
-            size="xl"
-          />
-        </div>
-      </AuroraBackground>
+      <InteractiveSelector
+        eyebrow="Image Generation"
+        title="选择图片生成类型"
+        subtitle="选择一个方向，进入对应的图片生成工作台。"
+        ctaLabel="开始创作"
+        options={imageTypes}
+      />
     </main>
   );
 }

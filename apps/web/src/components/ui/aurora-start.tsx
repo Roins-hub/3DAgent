@@ -2,7 +2,7 @@
 
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { Image as ImageIcon, Sparkles } from "lucide-react";
+import { Image as ImageIcon } from "lucide-react";
 import { AuroraBackground } from "@/components/ui/aurora-background";
 
 export function AuroraStart() {
@@ -19,12 +19,11 @@ export function AuroraStart() {
         className="aurora-start-content"
       >
         <p className="aurora-kicker">
-          <Sparkles size={16} />
-          智模工坊
+          智模精工
         </p>
-        <h1>工业级三维智能生成平台</h1>
+        <h1>智模精工</h1>
         <p className="aurora-subtitle">
-          以自然语言驱动三维资产、工业图像、任务编排与交付归档，让创意输入转化为可预览、可追踪、可下载的工程化生成结果。
+          精密机械元件AI工业设计先锋者
         </p>
         <div className="aurora-actions">
           <Link href="/model" className="aurora-primary">

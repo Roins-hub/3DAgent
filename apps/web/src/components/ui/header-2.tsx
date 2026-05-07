@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Box, ChevronDown, Cuboid, Sparkles, WandSparkles } from "lucide-react";
+import { Box, ChevronDown, Cuboid, WandSparkles } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { Button, buttonVariants } from "@/components/ui/Button";
@@ -105,10 +105,7 @@ export function Header() {
         )}
       >
         <Link href="/" className="flex items-center gap-2 font-semibold">
-          <span className="flex size-7 items-center justify-center rounded-md bg-foreground text-background">
-            <Sparkles size={15} />
-          </span>
-          <span>智模工坊</span>
+          <span>智模精工</span>
         </Link>
 
         <div className="hidden items-center justify-center gap-1 md:flex">

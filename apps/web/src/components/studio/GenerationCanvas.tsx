@@ -20,7 +20,7 @@ class ModelErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("模型加载失败", error, info);
+    console.error("模型渲染失败", error, info);
   }
 
   componentDidUpdate(previousProps: { resetKey: string | null }) {
@@ -34,13 +34,7 @@ class ModelErrorBoundary extends Component<
   }
 }
 
-function ModelAsset({
-  url,
-  onLoaded,
-}: {
-  url: string;
-  onLoaded: () => void;
-}) {
+function ModelAsset({ url, onLoaded }: { url: string; onLoaded: () => void }) {
   const group = useRef<Group>(null);
   const gltf = useGLTF(url);
 
@@ -67,15 +61,16 @@ function AuthenticatedModelAsset({
   activeJob,
   url,
   onLoaded,
+  onError,
 }: {
   activeJob: GenerationJob;
   url: string;
   onLoaded: () => void;
+  onError: (message: string) => void;
 }) {
   const [assetState, setAssetState] = useState<{
     sourceUrl: string;
     objectUrl: string | null;
-    error: Error | null;
   } | null>(null);
 
   useEffect(() => {
@@ -92,22 +87,20 @@ function AuthenticatedModelAsset({
 
         if (!response.ok) {
           const body = await response.json().catch(() => null);
-          throw new Error(body?.detail ?? `模型预览加载失败 ${response.status}`);
+          onError(body?.detail ?? `模型预览加载失败：HTTP ${response.status}`);
+          return;
         }
 
         const blob = await response.blob();
         console.info("模型文件下载完成", Math.round(performance.now() - startedAt), "ms");
         nextObjectUrl = window.URL.createObjectURL(blob);
-        setAssetState({ sourceUrl: url, objectUrl: nextObjectUrl, error: null });
+        setAssetState({ sourceUrl: url, objectUrl: nextObjectUrl });
+        onLoaded();
       } catch (error) {
         if (controller.signal.aborted) {
           return;
         }
-        setAssetState({
-          sourceUrl: url,
-          objectUrl: null,
-          error: error instanceof Error ? error : new Error("模型预览加载失败"),
-        });
+        onError(error instanceof Error ? error.message : "模型预览加载失败");
       }
     }
 
@@ -119,11 +112,7 @@ function AuthenticatedModelAsset({
         window.URL.revokeObjectURL(nextObjectUrl);
       }
     };
-  }, [url]);
-
-  if (assetState?.sourceUrl === url && assetState.error) {
-    throw assetState.error;
-  }
+  }, [onError, onLoaded, url]);
 
   if (assetState?.sourceUrl !== url || !assetState.objectUrl) {
     return <PreviewAsset activeJob={activeJob} mode="loading" />;
@@ -170,7 +159,18 @@ function PreviewAsset({
   );
 }
 
-function getOverlayCopy(activeJob: GenerationJob | null, isModelLoading: boolean) {
+function getOverlayCopy(
+  activeJob: GenerationJob | null,
+  isModelLoading: boolean,
+  modelError: string | null,
+) {
+  if (modelError) {
+    return {
+      title: "模型文件不可用",
+      body: modelError,
+    };
+  }
+
   if (isModelLoading) {
     return {
       title: "模型文件加载中",
@@ -215,14 +215,22 @@ export function GenerationCanvas({
   const [key, setKey] = useState(0);
   const [isZoomed, setIsZoomed] = useState(false);
   const [loadedModelUrl, setLoadedModelUrl] = useState<string | null>(null);
+  const [modelError, setModelError] = useState<{
+    sourceUrl: string;
+    message: string;
+  } | null>(null);
+  const currentModelError =
+    modelError && modelError.sourceUrl === modelUrl ? modelError.message : null;
   const isRealModel =
     activeJob?.status === "completed" &&
     Boolean(modelUrl) &&
     modelUrl !== "/models/demo-asset.glb";
-  const isModelLoading = Boolean(isRealModel && loadedModelUrl !== modelUrl);
+  const isModelLoading = Boolean(
+    isRealModel && loadedModelUrl !== modelUrl && !currentModelError,
+  );
   const overlayCopy = useMemo(
-    () => getOverlayCopy(activeJob, isModelLoading),
-    [activeJob, isModelLoading],
+    () => getOverlayCopy(activeJob, isModelLoading, currentModelError),
+    [activeJob, isModelLoading, currentModelError],
   );
   const camera = isZoomed
     ? { position: [2.15, 1.65, 2.55] as [number, number, number], fov: 34 }
@@ -230,7 +238,7 @@ export function GenerationCanvas({
 
   return (
     <div className="studio-preview-canvas">
-      {(isModelLoading || !isRealModel) && (
+      {(currentModelError || isModelLoading || !isRealModel) && (
         <div className="studio-preview-overlay">
           <div className="studio-preview-loader">
             {isModelLoading ? <Loader2 className="animate-spin" size={26} /> : null}
@@ -268,9 +276,11 @@ export function GenerationCanvas({
 
       <div className="studio-preview-state">
         {activeJob?.status === "completed"
-          ? isModelLoading
-            ? "加载模型"
-            : "生成预览"
+          ? currentModelError
+            ? "文件不可用"
+            : isModelLoading
+              ? "加载模型"
+              : "生成预览"
           : activeJob
             ? "正在生成"
             : "就绪"}
@@ -284,7 +294,7 @@ export function GenerationCanvas({
       >
         <ambientLight intensity={0.85} />
         <directionalLight position={[4, 6, 3]} intensity={2} castShadow />
-        {activeJob?.status === "completed" && modelUrl ? (
+        {activeJob?.status === "completed" && modelUrl && !currentModelError ? (
           <ModelErrorBoundary
             fallback={<PreviewAsset activeJob={activeJob} mode="loading" />}
             resetKey={modelUrl}
@@ -294,6 +304,7 @@ export function GenerationCanvas({
                 activeJob={activeJob}
                 url={modelUrl}
                 onLoaded={() => setLoadedModelUrl(modelUrl)}
+                onError={(message) => setModelError({ sourceUrl: modelUrl, message })}
               />
             </Suspense>
           </ModelErrorBoundary>

@@ -10,6 +10,25 @@ import { getAuthHeaders } from "@/lib/supabase";
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8016";
 
+function formatApiError(status: number, detail: unknown) {
+  if (typeof detail === "string" && detail.trim()) {
+    return detail;
+  }
+  if (status === 401) {
+    return "登录已失效，请重新登录后再试。";
+  }
+  if (status === 403) {
+    return "当前账号没有权限执行这个操作。";
+  }
+  if (status === 502) {
+    return "后端连接 Supabase 或模型服务失败，请检查后端日志和环境配置。";
+  }
+  if (status >= 500) {
+    return `后端服务异常：HTTP ${status}`;
+  }
+  return `请求失败：HTTP ${status}`;
+}
+
 export interface AuthUser {
   id: string;
   email: string | null;
@@ -113,18 +132,26 @@ export type HelpChatStreamOptions = {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const authHeaders = await getAuthHeaders();
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders,
-      ...init?.headers,
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders,
+        ...init?.headers,
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    throw new Error(
+      `无法连接后端 ${API_BASE_URL}。请确认 FastAPI 已在 8016 启动。${message ? `（${message}）` : ""}`,
+    );
+  }
 
   if (!response.ok) {
     const body = await response.json().catch(() => null);
-    throw new Error(body?.detail ?? `Request failed: ${response.status}`);
+    throw new Error(formatApiError(response.status, body?.detail));
   }
 
   return response.json() as Promise<T>;

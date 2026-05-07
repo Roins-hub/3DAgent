@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import base64
@@ -48,6 +48,7 @@ NEURAL4D_POLL_SECONDS = 8
 SUPABASE_REQUEST_RETRIES = 2
 SUPABASE_AUTH_CACHE_SECONDS = 60
 ADMIN_SETTINGS_CACHE_SECONDS = 30
+SUPABASE_IMAGE_BUCKET = "generation-assets"
 ADMIN_SECRET_KEYS = {
     "MESHY_API_KEY",
     "NEURAL4D_API_TOKEN",
@@ -250,7 +251,7 @@ class TencentAi3dConfig:
     region: str
 
 
-app = FastAPI(title="智模工坊 API", version="0.1.0")
+app = FastAPI(title="鏅烘ā宸ュ潑 API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -268,8 +269,12 @@ auth_user_cache: dict[str, tuple[float, AuthUser]] = {}
 admin_settings_cache: tuple[float, dict[str, dict[str, Any]]] | None = None
 DEMO_MODEL_PATH = ROOT_DIR / "apps" / "web" / "public" / "models" / "demo-asset.glb"
 MODEL_CACHE_DIR = ROOT_DIR / ".cache" / "models"
-IMAGE_CACHE_DIR = ROOT_DIR / ".cache" / "images"
+IMAGE_CACHE_DIR = ROOT_DIR / "apps" / "api" / "generated" / "images"
+LEGACY_IMAGE_CACHE_DIR = ROOT_DIR / ".cache" / "images"
 MODEL_CONVERTER_SCRIPT = ROOT_DIR / "apps" / "api" / "scripts" / "convert_model.mjs"
+PLACEHOLDER_IMAGE_BYTES = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR4nGN4+PDhfwAIAwMBPMf5OgAAAABJRU5ErkJggg=="
+)
 
 
 def now_iso() -> str:
@@ -316,13 +321,19 @@ def user_owns_local_job(job_id: str, user: AuthUser) -> bool:
     return job_contexts.get(job_id, {}).get("user_id") == user.id
 
 
+def model_cache_path_for_values(
+    job_id: str, export_format: TargetFormat, source_url: str | None
+) -> Path:
+    cache_key = hashlib.sha256(
+        f"{job_id}:{source_url}:{export_format}".encode("utf-8")
+    ).hexdigest()
+    return MODEL_CACHE_DIR / f"{cache_key}.{export_format}"
+
+
 def model_cache_path(
     job: GenerationJob, export_format: TargetFormat, source_url: str | None = None
 ) -> Path:
-    cache_key = hashlib.sha256(
-        f"{job.id}:{source_url or job.modelUrl}:{export_format}".encode("utf-8")
-    ).hexdigest()
-    return MODEL_CACHE_DIR / f"{cache_key}.{export_format}"
+    return model_cache_path_for_values(job.id, export_format, source_url or job.modelUrl)
 
 
 def infer_model_format(model_url: str | None, fallback: TargetFormat) -> TargetFormat:
@@ -359,8 +370,8 @@ def format_unavailable_error(job: GenerationJob, export_format: TargetFormat) ->
     return HTTPException(
         status_code=409,
         detail=(
-            f"当前任务没有可用的 {export_format.upper()} 文件。"
-            f"请用 {export_format.upper()} 重新生成，或选择 {job.targetFormat.upper()} 导出。"
+            f"The current job has no available {export_format.upper()} file. "
+            f"Please regenerate as {export_format.upper()} or export as {job.targetFormat.upper()}."
         ),
     )
 
@@ -389,10 +400,22 @@ def convert_model_file(source_path: Path, target_path: Path, target_format: Targ
         raise RuntimeError(f"Model conversion failed: {message}")
 
 
+class ModelDownloadError(RuntimeError):
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
 def download_remote_model(source_url: str, target_path: Path) -> None:
     try:
         response = requests.get(source_url, stream=True, timeout=120)
-        response.raise_for_status()
+        if response.status_code >= 400:
+            if response.status_code in {403, 404}:
+                raise ModelDownloadError(
+                    "模型文件已过期或已被服务商移除，请重新生成这个历史任务。",
+                    status_code=response.status_code,
+                )
+            response.raise_for_status()
         target_path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = target_path.with_suffix(f"{target_path.suffix}.tmp")
         try:
@@ -405,8 +428,19 @@ def download_remote_model(source_url: str, target_path: Path) -> None:
             response.close()
             if temp_path.exists():
                 temp_path.unlink()
+    except ModelDownloadError:
+        raise
     except requests.RequestException as exc:
         raise RuntimeError(f"Could not fetch generated model: {exc}") from exc
+
+
+def cache_provider_model(job_id: str, target_format: TargetFormat, source_url: str) -> None:
+    if not source_url.startswith(("http://", "https://")):
+        return
+    cached_path = model_cache_path_for_values(job_id, target_format, source_url)
+    if cached_path.exists() and cached_path.stat().st_size > 0:
+        return
+    download_remote_model(source_url, cached_path)
 
 
 def selected_provider() -> str:
@@ -432,6 +466,15 @@ def mimo_chat_model() -> str:
 
 def cadam_chat_model() -> str:
     return runtime_setting_value("CADAM_CHAT_MODEL", mimo_chat_model()).strip() or mimo_chat_model()
+
+
+def cadam_mimo_max_completion_tokens() -> int:
+    raw_value = runtime_setting_value("CADAM_MIMO_MAX_COMPLETION_TOKENS", "6000").strip()
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return 6000
+    return max(2200, min(value, 12000))
 
 
 def cadam_llm_provider() -> str:
@@ -471,7 +514,7 @@ def help_system_prompt() -> str:
     return (
         "你是智模工坊平台的中文 AI 帮助助手。你的职责是帮助用户理解和排查本平台的使用问题，"
         "包括账号登录、邮箱验证码、工业模型生成、图片生成、CAD 参数获取、CADAM 参数化建模、"
-        "提示词优化、模型格式和下载、以及常见启动报错。"
+        "提示词优化、模型格式和下载，以及常见启动报错。"
         "当用户询问 CAD 参数或 CAD 建模时，要说明用户可以先让 AI 根据用途、外形、尺寸约束、"
         "孔位、厚度、圆角、材质和装配关系整理参数值，再把这些参数带到 CADAM 工作台生成参数化 OpenSCAD，"
         "最后在工业建模/CAD 工作台预览、调整和导出模型。"
@@ -502,9 +545,9 @@ def build_help_reply(request: HelpChatRequest) -> str:
             "可以。推荐流程是：\n"
             "1. 先告诉 AI 你要做的零件用途、外形、关键尺寸、孔位、厚度、圆角、装配关系和目标单位。\n"
             "2. 让 AI 输出一组 CAD参数，例如 width、height、depth、thickness、holeDiameter、cornerRadius 等。\n"
-            "3. 把确认后的参数带到 CADAM/工业 CAD 建模入口，由 CADAM 生成参数化 OpenSCAD 模型。\n"
+            "3. 把确认后的 CAD参数带到 CADAM/工业 CAD 建模入口，由 CADAM 生成参数化 OpenSCAD 模型。\n"
             "4. 在 CAD 工作台预览模型，如果尺寸不合适，继续让 AI 调整参数后重新生成。\n"
-            "例如你可以问：`帮我设计一个传感器安装支架，给出可建模的 CAD参数，并说明每个参数含义。`"
+            "例如你可以问：帮我设计一个传感器安装支架，给出可建模的 CAD参数，并说明每个参数含义。"
         )
 
     if any(keyword in question for keyword in ["登录", "验证码", "账号", "register", "login"]):
@@ -519,7 +562,7 @@ def build_help_reply(request: HelpChatRequest) -> str:
     if any(keyword in question for keyword in ["图片", "image", "图像"]):
         return (
             "图片生成入口在导航里的“图片生成”。建议提示词包含主体、风格、画面比例和用途，"
-            "例如：`一台白色科幻无人机，产品渲染风格，16:9，干净背景`。生成后会在历史记录里"
+            "例如：一台白色科幻无人机，产品渲染风格，16:9，干净背景。生成后会在历史记录里"
             "保留结果，方便继续查看或下载。"
         )
 
@@ -533,7 +576,7 @@ def build_help_reply(request: HelpChatRequest) -> str:
     if any(keyword in question for keyword in ["报错", "失败", "错误", "error", "端口", "启动"]):
         return (
             "常见启动问题通常来自端口占用或旧进程未关闭。前端默认使用 3000，后端开发脚本使用 8016。"
-            "如果看到 `Another next dev server is already running`，可以先查 3000 端口对应 PID，"
+            "如果看到 `Another next dev server is already running`，可以先检查 3000 端口对应 PID，"
             "再用 `taskkill /PID <PID> /T /F` 结束旧进程后重新启动。"
         )
 
@@ -805,7 +848,7 @@ def call_mimo_cadam_generation(request: CadamGenerateRequest) -> CadamGenerateRe
                 "content": json.dumps(user_payload, ensure_ascii=False),
             },
         ],
-        "max_completion_tokens": 2200,
+        "max_completion_tokens": cadam_mimo_max_completion_tokens(),
         "temperature": 0.18,
         "top_p": 0.86,
         "stream": False,
@@ -1034,6 +1077,11 @@ def supabase_admin_url(path: str) -> str:
     if path.startswith("auth/"):
         return f"{supabase_url}/{path}"
     return f"{supabase_url}/rest/v1/{path}"
+
+
+def supabase_storage_url(path: str) -> str:
+    supabase_url, _ = supabase_auth_config()
+    return f"{supabase_url}/storage/v1/{path.lstrip('/')}"
 
 
 def supabase_headers(authorization: str, *, prefer: str | None = None) -> dict[str, str]:
@@ -1922,6 +1970,107 @@ def image_cache_path(job_id: str) -> Path:
     return IMAGE_CACHE_DIR / f"{job_id}.png"
 
 
+def legacy_image_cache_path(job_id: str) -> Path:
+    return LEGACY_IMAGE_CACHE_DIR / f"{job_id}.png"
+
+
+def existing_image_cache_path(job_id: str) -> Path | None:
+    for image_path in (image_cache_path(job_id), legacy_image_cache_path(job_id)):
+        if image_path.exists() and image_path.stat().st_size > 0:
+            return image_path
+    return None
+
+
+def write_generated_image(job_id: str, content: bytes) -> Path:
+    IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    image_path = image_cache_path(job_id)
+    temp_path = image_path.with_suffix(".png.tmp")
+    temp_path.write_bytes(content)
+    temp_path.replace(image_path)
+    return image_path
+
+
+def storage_image_path(job_id: str) -> str:
+    return f"image-jobs/{job_id}.png"
+
+
+def storage_image_url(job_id: str) -> str:
+    return f"supabase-storage://{SUPABASE_IMAGE_BUCKET}/{storage_image_path(job_id)}"
+
+
+def parse_storage_image_url(value: str) -> tuple[str, str] | None:
+    prefix = "supabase-storage://"
+    if not value.startswith(prefix):
+        return None
+    rest = value.removeprefix(prefix)
+    bucket, separator, path = rest.partition("/")
+    if not bucket or not separator or not path:
+        return None
+    return bucket, path
+
+
+def upload_generated_image(job_id: str, image_path: Path) -> str:
+    response = supabase_request(
+        requests.post,
+        supabase_storage_url(
+            f"object/{SUPABASE_IMAGE_BUCKET}/{quote(storage_image_path(job_id))}"
+        ),
+        headers={
+            "apikey": supabase_service_role_key(),
+            "Authorization": f"Bearer {supabase_service_role_key()}",
+            "Content-Type": "image/png",
+            "x-upsert": "true",
+        },
+        data=image_path.read_bytes(),
+        timeout=60,
+    )
+    if not response.ok:
+        raise_supabase_error(response)
+    return storage_image_url(job_id)
+
+
+def download_storage_image(job: ImageJob) -> Path:
+    parsed = parse_storage_image_url(job.imageUrl or "")
+    if parsed is None:
+        raise RuntimeError("Image job does not have a Supabase Storage image URL.")
+
+    bucket, path = parsed
+    cached_path = image_cache_path(job.id)
+    existing_path = existing_image_cache_path(job.id)
+    if existing_path is not None:
+        return existing_path
+
+    try:
+        response = supabase_request(
+            requests.get,
+            supabase_storage_url(f"object/{bucket}/{quote(path)}"),
+            headers={
+                "apikey": supabase_service_role_key(),
+                "Authorization": f"Bearer {supabase_service_role_key()}",
+            },
+            stream=True,
+            timeout=60,
+        )
+        if not response.ok:
+            raise_supabase_error(response)
+        IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        temp_path = cached_path.with_suffix(".png.tmp")
+        try:
+            with temp_path.open("wb") as image_file:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        image_file.write(chunk)
+            temp_path.replace(cached_path)
+        finally:
+            response.close()
+            if temp_path.exists():
+                temp_path.unlink()
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Could not fetch generated image from Supabase Storage: {exc}") from exc
+
+    return cached_path
+
+
 def image_file_response(job_id: str, image_path: Path) -> FileResponse:
     return FileResponse(
         image_path,
@@ -1939,8 +2088,9 @@ def cache_remote_image(job: ImageJob) -> Path:
         raise RuntimeError("Image job does not have a remote image URL.")
 
     cached_path = image_cache_path(job.id)
-    if cached_path.exists() and cached_path.stat().st_size > 0:
-        return cached_path
+    existing_path = existing_image_cache_path(job.id)
+    if existing_path is not None:
+        return existing_path
 
     try:
         response = requests.get(job.imageUrl, stream=True, timeout=120)
@@ -2049,7 +2199,7 @@ def create_siliconflow_image(request: CreateImageJobRequest) -> str:
         )
     except requests.Timeout as exc:
         raise RuntimeError(
-            "SiliconFlow 图片生成超时：当前模型排队或响应过慢，请稍后重试，"
+            "SiliconFlow 图片生成超时：当前模型排队或响应较慢，请稍后重试，"
             "或在 .env 中切换 SILICONFLOW_IMAGE_MODEL。"
         ) from exc
     except requests.RequestException as exc:
@@ -2124,9 +2274,9 @@ def create_openai_image(job_id: str, request: CreateImageJobRequest) -> str:
             timeout=OPENAI_IMAGE_TIMEOUT_SECONDS,
         )
     except requests.Timeout as exc:
-        raise RuntimeError("OpenAI 图片生成超时：当前模型或中转站响应较慢，请稍后重试。") from exc
+        raise RuntimeError("OpenAI image generation timed out. Please retry later.") from exc
     except requests.RequestException as exc:
-        raise RuntimeError(f"OpenAI 图片生成请求失败：{exc}") from exc
+        raise RuntimeError(f"OpenAI image generation request failed: {exc}") from exc
 
     if response.status_code >= 400:
         try:
@@ -2139,7 +2289,7 @@ def create_openai_image(job_id: str, request: CreateImageJobRequest) -> str:
             )
         except ValueError:
             error_message = response.text
-        raise RuntimeError(f"OpenAI 图片生成失败：HTTP {response.status_code} {error_message}")
+        raise RuntimeError(f"OpenAI image generation failed: HTTP {response.status_code} {error_message}")
 
     data = response.json()
     images = data.get("data") or []
@@ -2163,10 +2313,8 @@ def create_openai_image(job_id: str, request: CreateImageJobRequest) -> str:
             f"OpenAI image generation returned no image data: {json.dumps(data, ensure_ascii=False)}"
         )
 
-    IMAGE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    image_path = image_cache_path(job_id)
-    image_path.write_bytes(base64.b64decode(b64_json))
-    return f"local://image-jobs/{job_id}/image"
+    image_path = write_generated_image(job_id, base64.b64decode(b64_json))
+    return upload_generated_image(job_id, image_path)
 
 
 async def run_siliconflow_image_generation(
@@ -2181,7 +2329,8 @@ async def run_siliconflow_image_generation(
         if pending_job is not None:
             cache_job = pending_job.model_copy(update={"imageUrl": image_url})
             update_image_job(job_id, status="postprocessing", progress=98)
-            await asyncio.to_thread(cache_remote_image, cache_job)
+            image_path = await asyncio.to_thread(cache_remote_image, cache_job)
+            image_url = await asyncio.to_thread(upload_generated_image, job_id, image_path)
         update_image_job(
             job_id,
             status="completed",
@@ -2299,7 +2448,7 @@ async def run_hunyuan_generation(job_id: str, request: CreateJobRequest) -> None
             job_id,
             status="failed",
             progress=0,
-            error="腾讯云混元生3D Provider 当前只支持文本生成3D。",
+            error="腾讯云混元生3D Provider 当前只支持文本生成 3D。",
         )
         return
 
@@ -2331,7 +2480,7 @@ async def run_hunyuan_generation(job_id: str, request: CreateJobRequest) -> None
             if raw_status in {"DONE", "SUCCESS", "SUCCEEDED"}:
                 model_url = model_url_from_hunyuan(task)
                 if not model_url:
-                    raise RuntimeError("混元生3D任务成功，但返回结果里没有模型 URL。")
+                    raise RuntimeError("混元生 3D 任务成功，但返回结果里没有模型 URL。")
                 update_job(
                     job_id,
                     status="completed",
@@ -2346,7 +2495,7 @@ async def run_hunyuan_generation(job_id: str, request: CreateJobRequest) -> None
                 message = (
                     task.get("ErrorMessage")
                     or task.get("Error")
-                    or "混元生3D任务失败。"
+                    or "混元生 3D 任务失败。"
                 )
                 update_job(job_id, status="failed", progress=progress, error=str(message))
                 return
@@ -2639,7 +2788,15 @@ def retry_admin_generation(row: dict[str, Any], admin: AuthUser) -> dict[str, An
 async def simulate_image_generation(job_id: str) -> None:
     update_image_job(job_id, status="running", progress=50)
     await asyncio.sleep(0)
-    update_image_job(job_id, status="completed", progress=100, imageUrl="local://image-jobs/demo/image", error=None)
+    image_path = write_generated_image(job_id, PLACEHOLDER_IMAGE_BYTES)
+    image_url = await asyncio.to_thread(upload_generated_image, job_id, image_path)
+    update_image_job(
+        job_id,
+        status="completed",
+        progress=100,
+        imageUrl=image_url,
+        error=None,
+    )
 
 
 @app.post("/api/admin/generation-jobs/{job_id}/action")
@@ -2809,7 +2966,12 @@ async def cadam_generate(request: CadamGenerateRequest) -> CadamGenerateResponse
     if provider == "openai":
         return await asyncio.to_thread(call_openai_cadam_generation, request)
     if provider == "mimo":
-        return await asyncio.to_thread(call_mimo_cadam_generation, request)
+        try:
+            return await asyncio.to_thread(call_mimo_cadam_generation, request)
+        except HTTPException:
+            if env_or_runtime_secret("CADAM_OPENAI_API_KEY") or env_or_runtime_secret("OPENAI_API_KEY"):
+                return await asyncio.to_thread(call_openai_cadam_generation, request)
+            raise
     raise HTTPException(status_code=400, detail="CADAM_LLM_PROVIDER must be mimo or openai.")
 
 
@@ -2973,14 +3135,29 @@ async def get_image_job_image(
     if job.status != "completed" or not job.imageUrl:
         raise HTTPException(status_code=409, detail="Image is not ready yet.")
 
+    if parse_storage_image_url(job.imageUrl):
+        try:
+            image_path = await asyncio.to_thread(download_storage_image, job)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return image_file_response(job.id, image_path)
+
     if job.imageUrl.startswith("local://"):
-        image_path = image_cache_path(job.id)
-        if not image_path.exists():
-            raise HTTPException(status_code=404, detail="Generated image file not found.")
+        image_path = existing_image_cache_path(job.id)
+        if image_path is None:
+            raise HTTPException(
+                status_code=410,
+                detail="Generated image file is missing. Please retry this image job.",
+            )
         return image_file_response(job.id, image_path)
 
     try:
         image_path = await asyncio.to_thread(cache_remote_image, job)
+    except ModelDownloadError as exc:
+        raise HTTPException(
+            status_code=410,
+            detail=str(exc),
+        ) from exc
     except RuntimeError as exc:
         raise HTTPException(
             status_code=502,

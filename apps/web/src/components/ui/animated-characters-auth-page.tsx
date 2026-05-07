@@ -471,7 +471,7 @@ export function AuthSplitPage({
           <span className="flex size-10 items-center justify-center rounded-xl bg-white/12 text-white backdrop-blur">
             <Sparkles className="size-5" />
           </span>
-          <span>智模工坊</span>
+          <span>智模精工</span>
         </Link>
         <div className="relative z-10 flex flex-1 items-end justify-center pb-12">
           <AuthCharacterScene
@@ -494,7 +494,7 @@ export function AuthSplitPage({
               <span className="flex size-10 items-center justify-center rounded-xl bg-foreground text-background">
                 <Sparkles className="size-5" />
               </span>
-              <span>智模工坊</span>
+              <span>智模精工</span>
             </Link>
             <Link className="text-sm font-semibold text-muted-foreground" href={actionHref}>
               {actionLabel}

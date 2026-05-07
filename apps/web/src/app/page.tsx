@@ -248,7 +248,7 @@ export default function Home() {
 
       <footer className="apple-footer">
         <div>
-          <strong>智模工坊</strong>
+          <strong>智模精工</strong>
           <p>面向工业设计的 AI 三维资产与图像方案生成平台。</p>
         </div>
         <nav aria-label="页脚产品">
@@ -256,7 +256,7 @@ export default function Home() {
           <Link href="/image">图像方案生成</Link>
           <Link href="/login">登录</Link>
         </nav>
-        <small>2026 智模工坊 All rights reserved</small>
+        <small>2026 智模精工 All rights reserved</small>
       </footer>
     </main>
   );

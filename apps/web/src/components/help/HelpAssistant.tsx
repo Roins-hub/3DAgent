@@ -42,7 +42,7 @@ export function HelpAssistant() {
   const [messages, setMessages] = React.useState<ChatMessage[]>([
     createMessage(
       "assistant",
-      "你好，我是智模工坊的 AI 帮助助手。你可以问我账号登录、CAD 参数获取、CADAM 参数化建模、工业模型生成、图片生成、模型下载和常见报错。",
+      "你好，我是智模精工的 AI 帮助助手。你可以问我账号登录、CAD 参数获取、CADAM 参数化建模、工业模型生成、图片生成、模型下载和常见报错。",
     ),
   ]);
   const [isSubmitting, setIsSubmitting] = React.useState(false);

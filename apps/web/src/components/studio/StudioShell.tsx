@@ -58,22 +58,26 @@ const modelTypeCopy = {
   furniture: {
     label: "家具模型",
     hint: "沙发、桌椅、柜体与室内陈设模型",
-    placeholder: "输入你想生成的家具模型，例如一张北欧风实木书桌，带圆角桌面、抽屉和金属桌腿",
+    placeholder:
+      "输入你想生成的家具模型，例如一张北欧风实木书桌，带圆角桌面、抽屉和金属桌腿",
   },
   stationery: {
     label: "文具模型",
     hint: "笔、收纳、桌面工具与学习用品模型",
-    placeholder: "输入你想生成的文具模型，例如一支未来感中性笔，透明笔杆、金属笔夹和防滑握把",
+    placeholder:
+      "输入你想生成的文具模型，例如一支未来感中性笔，透明笔杆、金属笔夹和防滑握把",
   },
   industrial: {
     label: "工业制作模型",
     hint: "设备外壳、生产夹具与机械结构模型",
-    placeholder: "输入你想生成的工业制作模型，例如一台紧凑型检测设备外壳，带散热孔、屏幕和按钮面板",
+    placeholder:
+      "输入你想生成的工业制作模型，例如一台紧凑型检测设备外壳，带散热孔、屏幕和按钮面板",
   },
   cultural: {
     label: "文创设计模型",
     hint: "摆件、礼品、纪念品与品牌衍生模型",
-    placeholder: "输入你想生成的文创设计模型，例如一款城市地标纪念摆件，含底座、浮雕纹理和礼品展示感",
+    placeholder:
+      "输入你想生成的文创设计模型，例如一款城市地标纪念摆件，含底座、浮雕纹理和礼品展示感",
   },
 };
 
@@ -99,6 +103,10 @@ function formatTime(value: string) {
   }).format(new Date(value));
 }
 
+function loadErrorMessage() {
+  return `历史记录加载失败，请确认后端 ${API_BASE_URL} 可访问，且当前账号已登录。`;
+}
+
 export function StudioShell() {
   const searchParams = useSearchParams();
   const modelType = getModelType(searchParams.get("type"));
@@ -116,12 +124,25 @@ export function StudioShell() {
     [activeJobId, jobs],
   );
 
+  const canDownload = Boolean(
+    activeJob?.status === "completed" && activeJob.modelUrl,
+  );
+  const resolvedModelUrl =
+    activeJob?.status === "completed" && activeJob.modelUrl
+      ? activeJob.modelUrl === "/models/demo-asset.glb"
+        ? activeJob.modelUrl
+        : api.modelUrl(activeJob.id, activeJob.targetFormat)
+      : null;
+  const selectedExportOption =
+    exportFormatOptions.find((option) => option.value === exportFormat) ??
+    exportFormatOptions[0];
+
   useEffect(() => {
     api
       .listJobs()
       .then(setJobs)
-      .catch(() => {
-        setError(`API 未连接，请确认 FastAPI 已在 ${API_BASE_URL} 启动`);
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : loadErrorMessage());
       });
   }, [setJobs]);
 
@@ -201,19 +222,6 @@ export function StudioShell() {
     }
   }
 
-  const canDownload = Boolean(
-    activeJob?.status === "completed" && activeJob.modelUrl,
-  );
-  const resolvedModelUrl =
-    activeJob?.status === "completed" && activeJob.modelUrl
-      ? activeJob.modelUrl === "/models/demo-asset.glb"
-        ? activeJob.modelUrl
-        : api.modelUrl(activeJob.id, activeJob.targetFormat)
-      : null;
-  const selectedExportOption =
-    exportFormatOptions.find((option) => option.value === exportFormat) ??
-    exportFormatOptions[0];
-
   return (
     <main className="studio-workspace studio-workspace--model">
       <header className="studio-workspace-topbar">
@@ -234,55 +242,64 @@ export function StudioShell() {
           )}
           <div className="studio-export-menu">
             <Button
-            variant="dark"
-            className="studio-export-main-button"
-            disabled={!canDownload || isExporting}
-            onClick={() => void exportModel()}
-            aria-busy={isExporting}
-            title={canDownload ? `导出 ${selectedExportOption.label}` : "模型完成后可导出"}
-          >
-            <Download className={isExporting ? "animate-pulse" : undefined} size={16} />
-            <span className="sm:hidden">导出</span>
-            <span className="hidden sm:inline">
-              导出 {selectedExportOption.label}
-            </span>
+              variant="dark"
+              className="studio-export-main-button"
+              disabled={!canDownload || isExporting}
+              onClick={() => void exportModel()}
+              aria-busy={isExporting}
+              title={
+                canDownload
+                  ? `导出 ${selectedExportOption.label}`
+                  : "模型完成后可导出"
+              }
+            >
+              <Download
+                className={isExporting ? "animate-pulse" : undefined}
+                size={16}
+              />
+              <span className="sm:hidden">导出</span>
+              <span className="hidden sm:inline">
+                导出 {selectedExportOption.label}
+              </span>
             </Button>
             <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="dark"
-                size="icon"
-                className="studio-export-menu-trigger"
-                aria-label="选择导出格式"
-                title="选择导出格式"
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="dark"
+                  size="icon"
+                  className="studio-export-menu-trigger"
+                  aria-label="选择导出格式"
+                  title="选择导出格式"
+                >
+                  <ChevronDown size={16} aria-hidden="true" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                className="w-64 border-white/70 bg-white/95 text-slate-950 shadow-xl backdrop-blur"
+                side="bottom"
+                sideOffset={8}
+                align="end"
               >
-                <ChevronDown size={16} aria-hidden="true" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              className="w-64 border-white/70 bg-white/95 text-slate-950 shadow-xl backdrop-blur"
-              side="bottom"
-              sideOffset={8}
-              align="end"
-            >
-              <DropdownMenuRadioGroup
-                value={exportFormat}
-                onValueChange={(value) => setExportFormat(value as TargetFormat)}
-              >
-                {exportFormatOptions.map((option) => (
-                  <DropdownMenuRadioItem
-                    key={option.value}
-                    value={option.value}
-                    className="items-start [&>span]:pt-1.5"
-                  >
-                    <div className="flex flex-col gap-1">
-                      <span className="text-sm font-semibold">{option.label}</span>
-                      <span className="text-xs text-slate-500">{option.description}</span>
-                    </div>
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
+                <DropdownMenuRadioGroup
+                  value={exportFormat}
+                  onValueChange={(value) => setExportFormat(value as TargetFormat)}
+                >
+                  {exportFormatOptions.map((option) => (
+                    <DropdownMenuRadioItem
+                      key={option.value}
+                      value={option.value}
+                      className="items-start [&>span]:pt-1.5"
+                    >
+                      <div className="flex flex-col gap-1">
+                        <span className="text-sm font-semibold">{option.label}</span>
+                        <span className="text-xs text-slate-500">
+                          {option.description}
+                        </span>
+                      </div>
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
             </DropdownMenu>
           </div>
         </div>
