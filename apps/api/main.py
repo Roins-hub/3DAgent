@@ -57,6 +57,8 @@ ADMIN_SECRET_KEYS = {
     "SILICONFLOW_API_KEY",
     "OPENAI_API_KEY",
     "CADAM_OPENAI_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "CADAM_DEEPSEEK_API_KEY",
     "MIMO_API_KEY",
 }
 ADMIN_VISIBLE_SETTING_KEYS = [
@@ -67,6 +69,7 @@ ADMIN_VISIBLE_SETTING_KEYS = [
     "SILICONFLOW_IMAGE_MODEL",
     "MIMO_CHAT_MODEL",
     "OPENAI_API_KEY",
+    "DEEPSEEK_API_KEY",
     "SILICONFLOW_API_KEY",
     "MIMO_API_KEY",
     "TENCENTCLOUD_SECRET_ID",
@@ -91,8 +94,9 @@ def comma_separated_env(name: str) -> list[str]:
     return [item.strip() for item in raw_value.split(",") if item.strip()]
 
 
-ROOT_DIR = Path(__file__).resolve().parents[2]
-API_ENV_PATH = Path(__file__).resolve().parent / ".env"
+ROOT_DIR = Path(os.environ.get("THREEDAGENT_ROOT_DIR", Path(__file__).resolve().parents[2])).resolve()
+API_DIR = Path(os.environ.get("THREEDAGENT_API_DIR", Path(__file__).resolve().parent)).resolve()
+API_ENV_PATH = API_DIR / ".env"
 load_env_file(ROOT_DIR / ".env")
 load_env_file(API_ENV_PATH)
 
@@ -272,11 +276,20 @@ image_jobs: dict[str, ImageJob] = {}
 job_contexts: dict[str, dict[str, str]] = {}
 auth_user_cache: dict[str, tuple[float, AuthUser]] = {}
 admin_settings_cache: tuple[float, dict[str, dict[str, Any]]] | None = None
-DEMO_MODEL_PATH = ROOT_DIR / "apps" / "web" / "public" / "models" / "demo-asset.glb"
-MODEL_CACHE_DIR = ROOT_DIR / ".cache" / "models"
-IMAGE_CACHE_DIR = ROOT_DIR / "apps" / "api" / "generated" / "images"
-LEGACY_IMAGE_CACHE_DIR = ROOT_DIR / ".cache" / "images"
-MODEL_CONVERTER_SCRIPT = ROOT_DIR / "apps" / "api" / "scripts" / "convert_model.mjs"
+DEMO_MODEL_PATH = Path(
+    os.environ.get(
+        "THREEDAGENT_DEMO_MODEL_PATH",
+        ROOT_DIR / "apps" / "web" / "public" / "models" / "demo-asset.glb",
+    )
+)
+MODEL_CACHE_DIR = Path(os.environ.get("THREEDAGENT_MODEL_CACHE_DIR", ROOT_DIR / ".cache" / "models"))
+IMAGE_CACHE_DIR = Path(
+    os.environ.get("THREEDAGENT_IMAGE_CACHE_DIR", API_DIR / "generated" / "images")
+)
+LEGACY_IMAGE_CACHE_DIR = Path(os.environ.get("THREEDAGENT_LEGACY_IMAGE_CACHE_DIR", ROOT_DIR / ".cache" / "images"))
+MODEL_CONVERTER_SCRIPT = Path(
+    os.environ.get("THREEDAGENT_MODEL_CONVERTER_SCRIPT", API_DIR / "scripts" / "convert_model.mjs")
+)
 PLACEHOLDER_IMAGE_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR4nGN4+PDhfwAIAwMBPMf5OgAAAABJRU5ErkJggg=="
 )
@@ -483,7 +496,36 @@ def cadam_mimo_max_completion_tokens() -> int:
 
 
 def cadam_llm_provider() -> str:
-    return runtime_setting_value("CADAM_LLM_PROVIDER", "mimo").strip().lower() or "mimo"
+    return runtime_setting_value("CADAM_LLM_PROVIDER", "cascade").strip().lower() or "cascade"
+
+
+def cadam_deepseek_base_url() -> str:
+    return runtime_setting_value("CADAM_DEEPSEEK_BASE_URL", "https://api.deepseek.com").strip().rstrip("/")
+
+
+def cadam_deepseek_models() -> list[str]:
+    models = comma_separated_env("CADAM_DEEPSEEK_MODELS")
+    if models:
+        return models
+    return ["deepseek-v4-flash", "deepseek-v4-pro"]
+
+
+def cadam_deepseek_max_tokens() -> int:
+    raw_value = runtime_setting_value("CADAM_DEEPSEEK_MAX_TOKENS", "8000").strip()
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return 8000
+    return max(2200, min(value, 16000))
+
+
+def cadam_deepseek_timeout_seconds() -> int:
+    raw_value = runtime_setting_value("CADAM_DEEPSEEK_TIMEOUT_SECONDS", "45").strip()
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return 45
+    return max(10, min(value, 120))
 
 
 def cadam_openai_base_url() -> str:
@@ -722,6 +764,14 @@ def cadam_system_prompt() -> str:
     )
 
 
+def deepseek_cadam_system_prompt() -> str:
+    return (
+        cadam_system_prompt()
+        + " For DeepSeek reasoning models, put your final answer in message.content, not reasoning_content. "
+        + "After any private reasoning, output exactly one JSON object and nothing else."
+    )
+
+
 def fallback_cadam_payload_from_text(text: str) -> dict[str, Any]:
     fence = re.search(r"```(?:openscad|scad)?\s*(.*?)```", text, re.IGNORECASE | re.DOTALL)
     scad = fence.group(1).strip() if fence else ""
@@ -805,6 +855,92 @@ def normalize_cadam_parameters(parameters: Any, fallback: dict[str, Any]) -> dic
         if source_key in merged and target_key not in merged:
             merged[target_key] = merged[source_key]
     return merged
+
+
+def is_cadam_fastener_prompt(prompt: str) -> bool:
+    return bool(
+        re.search(
+            r"螺钉|螺丝|螺栓|内六角|socket|screw|bolt|cap screw|\bm\s*\d+(?:\.\d+)?\s*[x×*]\s*\d+",
+            prompt,
+            re.IGNORECASE,
+        )
+    )
+
+
+def metric_fastener_dimensions(prompt: str) -> tuple[float, float]:
+    metric_match = re.search(r"\bm\s*(\d+(?:\.\d+)?)(?:\s*[x×*]\s*(\d+(?:\.\d+)?))?", prompt, re.IGNORECASE)
+    if metric_match:
+        diameter = float(metric_match.group(1))
+        length_match = re.search(r"(?:长度|长|length)\D{0,12}(\d+(?:\.\d+)?)", prompt, re.IGNORECASE)
+        length = float(metric_match.group(2) or (length_match.group(1) if length_match else "20"))
+        return diameter, length
+
+    values = [float(value) for value in re.findall(r"\d+(?:\.\d+)?", prompt)]
+    diameter = values[0] if values else 6.0
+    length_match = re.search(r"(?:长度|长|length)\D{0,12}(\d+(?:\.\d+)?)", prompt, re.IGNORECASE)
+    length = float(length_match.group(1)) if length_match else values[1] if len(values) > 1 else 20.0
+    return diameter, length
+
+
+def local_socket_head_screw_response(
+    request: CadamGenerateRequest,
+    provider: str = "local-cadam",
+    model: str = "socket-head-screw-kernel",
+) -> CadamGenerateResponse:
+    diameter, length = metric_fastener_dimensions(request.prompt)
+    diameter = max(2.0, min(24.0, diameter))
+    length = max(6.0, min(120.0, length))
+    head_diameter = diameter * 1.65
+    head_height = diameter
+    socket_diameter = diameter * 0.62
+    name = f"m{str(diameter).replace('.', '_')}_socket_head_screw"
+    scad = f"""module {name}(length={length:g}, head_d={head_diameter:g}, head_h={head_height:g}, shaft_d={diameter:g}, socket_d={socket_diameter:g}) {{
+  difference() {{
+    union() {{
+      cylinder(d=head_d, h=head_h, $fn=96);
+      translate([0, 0, -length])
+        cylinder(d=shaft_d, h=length, $fn=72);
+      translate([0, 0, -length])
+        cylinder(d=shaft_d * 0.88, h=length, $fn=18);
+    }}
+    translate([0, 0, head_h * 0.38])
+      cylinder(d=socket_d, h=head_h, $fn=6);
+    translate([0, 0, head_h - 0.35])
+      cylinder(d1=head_d * 0.92, d2=head_d * 0.84, h=0.6, $fn=96);
+  }}
+}}
+
+{name}();"""
+    return CadamGenerateResponse(
+        name=name,
+        description=f"M{diameter:g} x {length:g} 内六角圆柱头螺钉",
+        parameters={
+            **request.parameters,
+            "kind": "screw",
+            "width": length,
+            "height": head_diameter,
+            "depth": head_height,
+            "thickness": diameter,
+            "holeDiameter": socket_diameter,
+        },
+        scad=scad,
+        provider=provider,
+        model=model,
+    )
+
+
+def ensure_cadam_response_matches_prompt(
+    request: CadamGenerateRequest,
+    response: CadamGenerateResponse,
+) -> CadamGenerateResponse:
+    if not is_cadam_fastener_prompt(request.prompt):
+        return response
+
+    combined = f"{response.name}\n{response.description}\n{response.scad}".lower()
+    if any(token in combined for token in ["screw", "bolt", "socket", "螺钉", "螺丝", "螺栓", "内六角"]):
+        return response
+
+    return local_socket_head_screw_response(request)
 
 
 def repair_main_module_defaults(scad: str, parameters: dict[str, Any]) -> str:
@@ -925,8 +1061,27 @@ def openai_chat_headers() -> dict[str, str]:
     }
 
 
-def call_openai_cadam_generation(request: CadamGenerateRequest) -> CadamGenerateResponse:
-    model = cadam_openai_model()
+def deepseek_chat_headers() -> dict[str, str]:
+    api_key = env_or_runtime_secret("CADAM_DEEPSEEK_API_KEY") or env_or_runtime_secret("DEEPSEEK_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="CADAM DeepSeek API key is not configured.")
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+
+def call_openai_compatible_cadam_generation(
+    request: CadamGenerateRequest,
+    *,
+    model: str,
+    base_url: str,
+    headers: dict[str, str],
+    provider: str,
+    system_prompt: str | None = None,
+    max_tokens: int = 2200,
+    timeout_seconds: int = 90,
+) -> CadamGenerateResponse:
     user_payload = {
         "prompt": request.prompt.strip(),
         "current_parameters": request.parameters,
@@ -935,45 +1090,45 @@ def call_openai_cadam_generation(request: CadamGenerateRequest) -> CadamGenerate
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": cadam_system_prompt()},
+            {"role": "system", "content": system_prompt or cadam_system_prompt()},
             {
                 "role": "user",
                 "content": json.dumps(user_payload, ensure_ascii=False),
             },
         ],
-        "max_tokens": 2200,
+        "max_tokens": max_tokens,
         "temperature": 0.18,
         "top_p": 0.86,
         "response_format": {"type": "json_object"},
     }
     response = requests.post(
-        f"{cadam_openai_base_url()}/chat/completions",
-        headers=openai_chat_headers(),
+        f"{base_url}/chat/completions",
+        headers=headers,
         json=payload,
-        timeout=90,
+        timeout=timeout_seconds,
     )
     if response.status_code >= 400:
         raise HTTPException(
             status_code=502,
-            detail=f"CADAM OpenAI-compatible request failed: HTTP {response.status_code}",
+            detail=f"CADAM {provider} request failed: HTTP {response.status_code}",
         )
 
     try:
         data = response.json()
     except ValueError as exc:
-        raise HTTPException(status_code=502, detail="CADAM OpenAI-compatible provider returned invalid JSON.") from exc
+        raise HTTPException(status_code=502, detail=f"CADAM {provider} provider returned invalid JSON.") from exc
 
     choices = data.get("choices")
     if not isinstance(choices, list) or not choices:
-        raise HTTPException(status_code=502, detail="CADAM OpenAI-compatible provider returned no choices.")
+        raise HTTPException(status_code=502, detail=f"CADAM {provider} provider returned no choices.")
 
     message = choices[0].get("message") if isinstance(choices[0], dict) else None
     if not isinstance(message, dict):
-        raise HTTPException(status_code=502, detail="CADAM OpenAI-compatible provider returned an invalid message.")
+        raise HTTPException(status_code=502, detail=f"CADAM {provider} provider returned an invalid message.")
 
     content = message.get("content")
     if not isinstance(content, str) or not content.strip():
-        raise HTTPException(status_code=502, detail="CADAM OpenAI-compatible provider returned an empty response.")
+        raise HTTPException(status_code=502, detail=f"CADAM {provider} provider returned an empty response.")
 
     parsed = extract_json_object(content)
     name = parsed.get("name")
@@ -991,8 +1146,31 @@ def call_openai_cadam_generation(request: CadamGenerateRequest) -> CadamGenerate
         description=str(description).strip() if description else "AI 生成的参数化 CAD 零件",
         scad=scad,
         parameters=parameters,
-        provider="openai-compatible",
+        provider=provider,
         model=model,
+    )
+
+
+def call_openai_cadam_generation(request: CadamGenerateRequest) -> CadamGenerateResponse:
+    return call_openai_compatible_cadam_generation(
+        request,
+        model=cadam_openai_model(),
+        base_url=cadam_openai_base_url(),
+        headers=openai_chat_headers(),
+        provider="openai-compatible",
+    )
+
+
+def call_deepseek_cadam_generation(request: CadamGenerateRequest, model: str) -> CadamGenerateResponse:
+    return call_openai_compatible_cadam_generation(
+        request,
+        model=model,
+        base_url=cadam_deepseek_base_url(),
+        headers=deepseek_chat_headers(),
+        provider="deepseek",
+        system_prompt=deepseek_cadam_system_prompt(),
+        max_tokens=cadam_deepseek_max_tokens(),
+        timeout_seconds=cadam_deepseek_timeout_seconds(),
     )
 
 
@@ -1239,6 +1417,10 @@ def runtime_setting_value(key: str, default: str = "") -> str:
     value = row.get("value") if row else None
     if isinstance(value, str) and value:
         return value
+    return os.getenv(key, default)
+
+
+def env_setting_value(key: str, default: str = "") -> str:
     return os.getenv(key, default)
 
 
@@ -2927,9 +3109,9 @@ async def health() -> dict[str, str]:
     return {
         "status": "ok",
         "service": "3d-agent-api",
-        "provider": selected_provider(),
-        "imageProvider": selected_image_provider(),
-        "cadamProvider": cadam_llm_provider(),
+        "provider": env_setting_value("MODEL_PROVIDER", "mock").strip().lower(),
+        "imageProvider": env_setting_value("IMAGE_PROVIDER", "siliconflow").strip().lower(),
+        "cadamProvider": env_setting_value("CADAM_LLM_PROVIDER", "mimo").strip().lower(),
     }
 
 
@@ -2968,16 +3150,51 @@ async def cadam_generate(request: CadamGenerateRequest) -> CadamGenerateResponse
         raise HTTPException(status_code=400, detail="Prompt is required.")
 
     provider = cadam_llm_provider()
+    if provider in {"cascade", "deepseek"}:
+        failures: list[str] = []
+        for model in cadam_deepseek_models():
+            try:
+                result = await asyncio.to_thread(call_deepseek_cadam_generation, request, model)
+                return ensure_cadam_response_matches_prompt(request, result)
+            except HTTPException as exc:
+                failures.append(f"deepseek:{model}:{exc.status_code}")
+                if provider == "deepseek":
+                    continue
+
+        if provider == "cascade":
+            try:
+                result = await asyncio.to_thread(call_mimo_cadam_generation, request)
+                return ensure_cadam_response_matches_prompt(request, result)
+            except HTTPException as exc:
+                failures.append(f"mimo:{cadam_chat_model()}:{exc.status_code}")
+
+            try:
+                result = await asyncio.to_thread(call_openai_cadam_generation, request)
+                return ensure_cadam_response_matches_prompt(request, result)
+            except HTTPException as exc:
+                failures.append(f"openai:{cadam_openai_model()}:{exc.status_code}")
+
+        if is_cadam_fastener_prompt(request.prompt):
+            return local_socket_head_screw_response(request)
+        raise HTTPException(status_code=502, detail=f"CADAM providers failed: {', '.join(failures)}")
+
     if provider == "openai":
-        return await asyncio.to_thread(call_openai_cadam_generation, request)
+        try:
+            result = await asyncio.to_thread(call_openai_cadam_generation, request)
+        except HTTPException:
+            if is_cadam_fastener_prompt(request.prompt):
+                return local_socket_head_screw_response(request)
+            raise
+        return ensure_cadam_response_matches_prompt(request, result)
     if provider == "mimo":
         try:
-            return await asyncio.to_thread(call_mimo_cadam_generation, request)
+            result = await asyncio.to_thread(call_mimo_cadam_generation, request)
         except HTTPException:
-            if env_or_runtime_secret("CADAM_OPENAI_API_KEY") or env_or_runtime_secret("OPENAI_API_KEY"):
-                return await asyncio.to_thread(call_openai_cadam_generation, request)
+            if is_cadam_fastener_prompt(request.prompt):
+                return local_socket_head_screw_response(request)
             raise
-    raise HTTPException(status_code=400, detail="CADAM_LLM_PROVIDER must be mimo or openai.")
+        return ensure_cadam_response_matches_prompt(request, result)
+    raise HTTPException(status_code=400, detail="CADAM_LLM_PROVIDER must be cascade, deepseek, mimo, or openai.")
 
 
 @app.post("/api/jobs", response_model=GenerationJob)

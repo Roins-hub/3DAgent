@@ -21,7 +21,7 @@ import * as THREE from "three";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import { api } from "@/lib/api";
 
-type ModelKind = "bracket" | "enclosure" | "gear" | "flange";
+type ModelKind = "bracket" | "enclosure" | "gear" | "flange" | "screw";
 
 type CadSpec = {
   kind: ModelKind;
@@ -73,12 +73,59 @@ function numberFromPrompt(prompt: string, fallback: number, index = 0) {
   return Number(matches[index]);
 }
 
+function fastenerLengthFromPrompt(prompt: string, fallback: number) {
+  const lengthMatch = prompt.match(/(?:长度|长|length)\D{0,12}(\d+(?:\.\d+)?)/i);
+  if (lengthMatch) {
+    return Number(lengthMatch[1]);
+  }
+
+  const metricMatch = prompt.match(/\bm\s*\d+(?:\.\d+)?(?:\s*[x×*]\s*(\d+(?:\.\d+)?))?/i);
+  if (metricMatch?.[1]) {
+    return Number(metricMatch[1]);
+  }
+
+  return fallback;
+}
+
 function inferSpec(prompt: string, current: CadSpec): CadSpec {
   const normalized = prompt.toLowerCase();
   const hasGear = /齿轮|gear/.test(normalized);
   const hasFlange = /法兰|flange|连接盘/.test(normalized);
   const hasEnclosure = /外壳|盒|壳体|enclosure|case/.test(normalized);
-  const kind: ModelKind = hasGear ? "gear" : hasFlange ? "flange" : hasEnclosure ? "enclosure" : "bracket";
+  const hasScrew =
+    /螺钉|螺丝|螺栓|内六角|socket|screw|bolt|cap screw/.test(normalized) ||
+    /\bm\s*\d+(?:\.\d+)?\s*[x×*]\s*\d+/i.test(prompt);
+  const metricMatch = prompt.match(/\bm\s*(\d+(?:\.\d+)?)(?:\s*[x×*]\s*(\d+(?:\.\d+)?))?/i);
+  const metricDiameter = metricMatch ? Number(metricMatch[1]) : numberFromPrompt(prompt, 6, 0);
+  const metricLength = fastenerLengthFromPrompt(prompt, numberFromPrompt(prompt, 20, 1));
+  const kind: ModelKind = hasScrew
+    ? "screw"
+    : hasGear
+      ? "gear"
+      : hasFlange
+        ? "flange"
+        : hasEnclosure
+          ? "enclosure"
+          : "bracket";
+
+  if (kind === "screw") {
+    const diameter = clamp(metricDiameter, 2, 24);
+    const length = clamp(metricLength, 6, 120);
+    const headDiameter = clamp(diameter * 1.65, diameter * 1.35, diameter * 2.2);
+    const headHeight = clamp(diameter, 2.5, 24);
+
+    return {
+      ...current,
+      kind,
+      name: `m${String(diameter).replace(".", "_")}_socket_head_screw`,
+      width: length,
+      height: headDiameter,
+      depth: headHeight,
+      thickness: diameter,
+      holeDiameter: clamp(diameter * 0.62, 1.5, 18),
+      cornerRadius: clamp(diameter * 0.12, 0.4, 3),
+    };
+  }
 
   if (kind === "gear") {
     return {
@@ -132,6 +179,26 @@ function inferSpec(prompt: string, current: CadSpec): CadSpec {
 }
 
 function scadForSpec(spec: CadSpec) {
+  if (spec.kind === "screw") {
+    return `module ${spec.name}(length=${spec.width}, head_d=${spec.height}, head_h=${spec.depth}, shaft_d=${spec.thickness}, socket_d=${spec.holeDiameter}) {
+  difference() {
+    union() {
+      cylinder(d=head_d, h=head_h, $fn=96);
+      translate([0, 0, -length])
+        cylinder(d=shaft_d, h=length, $fn=72);
+      translate([0, 0, -length])
+        cylinder(d=shaft_d * 0.88, h=length, $fn=18);
+    }
+    translate([0, 0, head_h * 0.38])
+      cylinder(d=socket_d, h=head_h, $fn=6);
+    translate([0, 0, head_h - 0.35])
+      cylinder(d1=head_d * 0.92, d2=head_d * 0.84, h=0.6, $fn=96);
+  }
+}
+
+${spec.name}();`;
+  }
+
   if (spec.kind === "gear") {
     return `module ${spec.name}(outer_d=${spec.width}, thickness=${spec.depth}, bore=${spec.holeDiameter}, teeth=${spec.teeth}) {
   difference() {
@@ -218,6 +285,27 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
   ]);
 }
 
+function isOpenScadConsoleError(args: unknown[]) {
+  const message = args.map((arg) => (arg instanceof Error ? arg.message : String(arg))).join(" ");
+  return /\[OpenSCAD Error\]|Parser error|syntax error|input\.scad/i.test(message);
+}
+
+async function withoutOpenScadConsoleOverlay<T>(task: () => Promise<T>) {
+  const originalConsoleError = console.error;
+  console.error = (...args: unknown[]) => {
+    if (isOpenScadConsoleError(args)) {
+      return;
+    }
+    originalConsoleError(...args);
+  };
+
+  try {
+    return await task();
+  } finally {
+    console.error = originalConsoleError;
+  }
+}
+
 function downloadTextFile(filename: string, content: string, type: string) {
   const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
@@ -294,10 +382,12 @@ export function CADAMWorkbench() {
         throw new Error("当前内容不像有效 OpenSCAD。");
       }
       const openScad = await getOpenScad();
-      const renderedStl = await withTimeout(
-        openScad.renderToStl(source),
-        OPENSCAD_COMPILE_TIMEOUT_MS,
-        "OpenSCAD WASM 编译超时，请简化代码或检查几何结构。",
+      const renderedStl = await withoutOpenScadConsoleOverlay(() =>
+        withTimeout(
+          openScad.renderToStl(source),
+          OPENSCAD_COMPILE_TIMEOUT_MS,
+          "OpenSCAD WASM 编译超时，请简化代码或检查几何结构。",
+        ),
       );
       if (!renderedStl.trim().startsWith("solid")) {
         throw new Error("OpenSCAD 没有返回有效 STL。");
@@ -325,8 +415,19 @@ export function CADAMWorkbench() {
         prompt,
         parameters: spec,
       });
-      const nextSpec = {
-        ...inferSpec(prompt, spec),
+      const inferredSpec = inferSpec(prompt, spec);
+      const nextSpec = inferredSpec.kind === "screw" ? {
+        ...inferredSpec,
+        name: result.name && /screw|bolt|螺/.test(result.name) ? result.name : inferredSpec.name,
+        width: Number(result.parameters.width ?? inferredSpec.width),
+        height: Number(result.parameters.height ?? inferredSpec.height),
+        depth: Number(result.parameters.depth ?? inferredSpec.depth),
+        thickness: Number(result.parameters.thickness ?? inferredSpec.thickness),
+        holeDiameter: Number(
+          result.parameters.holeDiameter ?? result.parameters.hole_diameter ?? inferredSpec.holeDiameter,
+        ),
+      } : {
+        ...inferredSpec,
         name: result.name || spec.name,
         width: Number(result.parameters.width ?? spec.width),
         height: Number(result.parameters.height ?? spec.height),
@@ -345,13 +446,19 @@ export function CADAMWorkbench() {
       setCode(candidateScad);
       setGeneratorMeta(`${result.provider.toUpperCase()} · ${result.model} · 参数化内核`);
       const compiled = await compileScad(candidateScad);
-      if (!compiled && candidateScad !== stableScad) {
+      if (compiled) {
+        setCompileNote("已生成参数化 OpenSCAD，并通过本地 WASM 编译，可预览和导出 STL。");
+      } else if (candidateScad !== stableScad) {
         setCode(stableScad);
         setGeneratorMeta(`${result.provider.toUpperCase()} · ${result.model} · 已回退本地内核`);
-        await compileScad(stableScad);
-        setCompileNote("AI 已返回 OpenSCAD，但该代码未通过本地 WASM 编译，已回退到同参数的稳定 CAD 内核。");
+        const fallbackCompiled = await compileScad(stableScad);
+        setCompileNote(
+          fallbackCompiled
+            ? "已自动切换为同参数的稳定 CAD 内核，并通过本地 WASM 编译，可预览和导出 STL。"
+            : "OpenSCAD 未通过本地 WASM 编译，请检查代码或参数。",
+        );
       } else {
-        setCompileNote("AI 已生成参数化 OpenSCAD，并已通过本地 WASM 编译，可预览和导出 STL。");
+        setCompileNote(null);
       }
     } catch (generateError) {
       const fallbackSpec = inferSpec(prompt, spec);
@@ -359,8 +466,12 @@ export function CADAMWorkbench() {
       setSpec(fallbackSpec);
       setCode(stableScad);
       setGeneratorMeta("本地参数化内核");
-      await compileScad(stableScad);
-      setCompileNote("大模型接口暂不可用，已根据文本和参数使用本地 CAD 内核生成可编译模型。");
+      const fallbackCompiled = await compileScad(stableScad);
+      setCompileNote(
+        fallbackCompiled
+          ? "大模型接口暂不可用，已根据文本和参数使用本地 CAD 内核生成模型，并通过本地 WASM 编译。"
+          : "大模型接口暂不可用，本地 CAD 内核也未通过 WASM 编译，请检查参数。",
+      );
     } finally {
       setIsGenerating(false);
     }

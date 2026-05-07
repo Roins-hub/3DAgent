@@ -5,18 +5,22 @@
   "license": "MIT",
   "workspaces": [
     "apps/admin",
+    "apps/desktop",
     "apps/web",
     "packages/shared"
   ],
   "scripts": {
     "dev": "concurrently -n api,web,admin -c blue,green,magenta \"npm run dev:api\" \"npm run dev:web\" \"npm run dev:admin\"",
+    "dev:desktop": "npm --workspace @3dagent/desktop run dev",
     "dev:web": "npm --workspace @3dagent/web run dev",
     "dev:admin": "npm --workspace @3dagent/admin run dev",
     "dev:api": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Set-Location apps/api; if (Test-Path ../../.venv/Scripts/uvicorn.exe) { ../../.venv/Scripts/uvicorn.exe main:app --reload --port 8016 } else { python -m uvicorn main:app --reload --port 8016 }\"",
     "lint": "npm --workspace @3dagent/web run lint && npm --workspace @3dagent/admin run lint",
     "build": "npm --workspace @3dagent/web run build && npm --workspace @3dagent/admin run build",
     "build:web": "npm --workspace @3dagent/web run build",
-    "build:admin": "npm --workspace @3dagent/admin run build"
+    "build:admin": "npm --workspace @3dagent/admin run build",
+    "build:api:desktop": "npm --workspace @3dagent/desktop run build:api",
+    "build:desktop": "npm run build:web && npm run build:api:desktop && npm --workspace @3dagent/desktop run dist"
   },
   "engines": {
     "node": ">=20.0.0",

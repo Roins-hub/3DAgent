@@ -44,6 +44,23 @@ def auth_user(email="admin@example.com"):
 
 
 class AdminApiTests(unittest.TestCase):
+    def test_health_does_not_require_runtime_settings(self):
+        with test_env(
+            {
+                "MODEL_PROVIDER": "hunyuan",
+                "IMAGE_PROVIDER": "openai",
+                "CADAM_LLM_PROVIDER": "openai",
+            }
+        ):
+            api = load_api()
+
+            with patch.object(api, "runtime_settings_map", side_effect=RuntimeError("network unavailable")):
+                result = asyncio.run(api.health())
+
+        self.assertEqual(result["provider"], "hunyuan")
+        self.assertEqual(result["imageProvider"], "openai")
+        self.assertEqual(result["cadamProvider"], "openai")
+
     def test_admin_allowed_origins_are_loaded_from_env(self):
         with test_env({"ADMIN_ALLOWED_ORIGINS": "https://admin.hhlai.xyz, https://ops.hhlai.xyz"}):
             api = load_api()

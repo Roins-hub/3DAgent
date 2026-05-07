@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { AuthProvider } from "@/components/auth/AuthProvider";
+import { DesktopNavigationBar } from "@/components/desktop/DesktopNavigationBar";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -18,6 +19,7 @@ export default function RootLayout({
       data-scroll-behavior="smooth"
     >
       <body>
+        <DesktopNavigationBar />
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>

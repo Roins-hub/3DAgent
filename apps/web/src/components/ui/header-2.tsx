@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Box, ChevronDown, Cuboid, WandSparkles } from "lucide-react";
+import { Atom, Box, ChevronDown, Cuboid, WandSparkles } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { Button, buttonVariants } from "@/components/ui/Button";
@@ -104,7 +104,13 @@ export function Header() {
           },
         )}
       >
-        <Link href="/" className="flex items-center gap-2 font-semibold">
+        <Link href="/" className="flex items-center gap-2.5 font-semibold">
+          <span
+            className="grid size-9 shrink-0 place-items-center rounded-full bg-[#252b3a] text-[#c8f5ff] shadow-sm ring-1 ring-slate-900/10"
+            aria-hidden="true"
+          >
+            <Atom className="size-6" strokeWidth={1.85} />
+          </span>
           <span>智模精工</span>
         </Link>
 

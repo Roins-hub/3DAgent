@@ -5,6 +5,8 @@ out
 dist
 *.tsbuildinfo
 apps/api/generated
+apps/api/build
+apps/api/*.spec
 .env
 .env.local
 SecretKey.csv
