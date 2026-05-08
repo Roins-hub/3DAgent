@@ -114,6 +114,32 @@ class AdminApiTests(unittest.TestCase):
         self.assertEqual(summary.imageJobs, 1)
         self.assertEqual(summary.modelJobs, 2)
 
+    def test_admin_users_runs_blocking_supabase_calls_off_event_loop(self):
+        with test_env():
+            api = load_api()
+            thread_calls = []
+
+            def fake_verify_admin_user(authorization):
+                self.assertEqual(authorization, "Bearer token")
+                return api.AuthUser(id="admin-1", email="admin@example.com")
+
+            def fake_admin_request(method, path, **kwargs):
+                return response_mock({"users": [auth_user()]})
+
+            async def fake_to_thread(func, *args, **kwargs):
+                thread_calls.append(func.__name__)
+                return func(*args, **kwargs)
+
+            with (
+                patch.object(api, "verify_admin_user", new=fake_verify_admin_user),
+                patch.object(api, "supabase_admin_request", new=fake_admin_request),
+                patch.object(api.asyncio, "to_thread", side_effect=fake_to_thread),
+            ):
+                result = asyncio.run(api.admin_list_users("Bearer token"))
+
+        self.assertEqual(len(result.users), 1)
+        self.assertEqual(thread_calls, ["fake_verify_admin_user", "fake_admin_request"])
+
     def test_admin_generation_jobs_allows_cadam_filter(self):
         with test_env():
             api = load_api()

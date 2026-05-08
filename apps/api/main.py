@@ -1554,6 +1554,46 @@ def verify_admin_user(authorization: str | None) -> AuthUser:
     return user
 
 
+async def verify_admin_user_async(authorization: str | None) -> AuthUser:
+    return await asyncio.to_thread(verify_admin_user, authorization)
+
+
+async def supabase_admin_request_async(
+    method: str,
+    path: str,
+    *,
+    json_body: Any | None = None,
+    prefer: str | None = None,
+    timeout: int = 20,
+) -> requests.Response:
+    return await asyncio.to_thread(
+        supabase_admin_request,
+        method,
+        path,
+        json_body=json_body,
+        prefer=prefer,
+        timeout=timeout,
+    )
+
+
+async def write_audit_log_async(
+    admin: AuthUser,
+    action: str,
+    target_type: str,
+    *,
+    target_id: str | None = None,
+    summary: str | None = None,
+) -> None:
+    await asyncio.to_thread(
+        write_audit_log,
+        admin,
+        action,
+        target_type,
+        target_id=target_id,
+        summary=summary,
+    )
+
+
 def runtime_settings_map() -> dict[str, dict[str, Any]]:
     global admin_settings_cache
     now = time.monotonic()
@@ -3067,9 +3107,9 @@ async def simulate_generation(job_id: str) -> None:
 
 @app.get("/api/admin/summary", response_model=AdminSummary)
 async def admin_summary(authorization: str | None = Header(default=None)) -> AdminSummary:
-    verify_admin_user(authorization)
+    await verify_admin_user_async(authorization)
     users_response, rows = await asyncio.gather(
-        asyncio.to_thread(supabase_admin_request, "GET", "/auth/v1/admin/users"),
+        supabase_admin_request_async("GET", "/auth/v1/admin/users"),
         asyncio.to_thread(admin_list_generation_rows, include_deleted=True, limit=500),
     )
     users_payload = users_response.json()
@@ -3093,8 +3133,8 @@ async def admin_summary(authorization: str | None = Header(default=None)) -> Adm
 
 @app.get("/api/admin/users", response_model=AdminUsersResponse)
 async def admin_list_users(authorization: str | None = Header(default=None)) -> AdminUsersResponse:
-    verify_admin_user(authorization)
-    response = supabase_admin_request("GET", "/auth/v1/admin/users")
+    await verify_admin_user_async(authorization)
+    response = await supabase_admin_request_async("GET", "/auth/v1/admin/users")
     payload = response.json()
     raw_users = payload.get("users") if isinstance(payload, dict) else payload
     users = [admin_user_from_payload(item) for item in raw_users if isinstance(item, dict)] if isinstance(raw_users, list) else []
@@ -3107,15 +3147,15 @@ async def admin_update_user(
     action: AdminUserAction,
     authorization: str | None = Header(default=None),
 ) -> AdminUser:
-    admin = verify_admin_user(authorization)
+    admin = await verify_admin_user_async(authorization)
     if action.action == "disable":
         payload = {"ban_duration": "876000h"}
         audit_action = "user.disable"
     else:
         payload = {"ban_duration": "none"}
         audit_action = "user.restore"
-    response = supabase_admin_request("PUT", f"/auth/v1/admin/users/{quote(user_id)}", json_body=payload)
-    write_audit_log(admin, audit_action, "user", target_id=user_id)
+    response = await supabase_admin_request_async("PUT", f"/auth/v1/admin/users/{quote(user_id)}", json_body=payload)
+    await write_audit_log_async(admin, audit_action, "user", target_id=user_id)
     payload = response.json()
     return admin_user_from_payload(payload if isinstance(payload, dict) else {"id": user_id})
 
@@ -3125,9 +3165,9 @@ async def admin_delete_user(
     user_id: str,
     authorization: str | None = Header(default=None),
 ) -> dict[str, bool]:
-    admin = verify_admin_user(authorization)
-    supabase_admin_request("DELETE", f"/auth/v1/admin/users/{quote(user_id)}")
-    write_audit_log(admin, "user.hard_delete", "user", target_id=user_id)
+    admin = await verify_admin_user_async(authorization)
+    await supabase_admin_request_async("DELETE", f"/auth/v1/admin/users/{quote(user_id)}")
+    await write_audit_log_async(admin, "user.hard_delete", "user", target_id=user_id)
     return {"ok": True}
 
 
@@ -3139,8 +3179,9 @@ async def admin_list_generation_jobs(
     includeDeleted: bool = False,
     authorization: str | None = Header(default=None),
 ) -> dict[str, list[dict[str, Any]]]:
-    verify_admin_user(authorization)
-    rows = admin_list_generation_rows(
+    await verify_admin_user_async(authorization)
+    rows = await asyncio.to_thread(
+        admin_list_generation_rows,
         kind=kind,
         status=status,
         search=search,
@@ -3250,9 +3291,9 @@ async def admin_update_generation_job(
     action: AdminGenerationJobAction,
     authorization: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    admin = verify_admin_user(authorization)
+    admin = await verify_admin_user_async(authorization)
     if action.action == "retry":
-        row = get_admin_history_row(job_id)
+        row = await asyncio.to_thread(get_admin_history_row, job_id)
         if row is None:
             raise HTTPException(status_code=404, detail="Generation job not found.")
         retry_row = retry_admin_generation(row, admin)
@@ -3263,14 +3304,14 @@ async def admin_update_generation_job(
     else:
         payload = {"deleted_at": None, "deleted_by": None, "updated_at": now_iso()}
         audit_action = "generation_job.restore"
-    supabase_admin_request(
+    await supabase_admin_request_async(
         "PATCH",
         f"generation_jobs?id=eq.{quote(job_id)}",
         json_body=payload,
         prefer="return=minimal",
     )
-    write_audit_log(admin, audit_action, "generation_job", target_id=job_id)
-    row = get_admin_history_row(job_id) or {"id": job_id, **payload}
+    await write_audit_log_async(admin, audit_action, "generation_job", target_id=job_id)
+    row = await asyncio.to_thread(get_admin_history_row, job_id) or {"id": job_id, **payload}
     return {"job": admin_job_response(row)}
 
 
@@ -3279,16 +3320,16 @@ async def admin_delete_generation_job(
     job_id: str,
     authorization: str | None = Header(default=None),
 ) -> dict[str, bool]:
-    admin = verify_admin_user(authorization)
-    supabase_admin_request("DELETE", f"generation_jobs?id=eq.{quote(job_id)}")
-    write_audit_log(admin, "generation_job.hard_delete", "generation_job", target_id=job_id)
+    admin = await verify_admin_user_async(authorization)
+    await supabase_admin_request_async("DELETE", f"generation_jobs?id=eq.{quote(job_id)}")
+    await write_audit_log_async(admin, "generation_job.hard_delete", "generation_job", target_id=job_id)
     return {"ok": True}
 
 
 @app.get("/api/admin/settings", response_model=AdminSettingsResponse)
 async def admin_get_settings(authorization: str | None = Header(default=None)) -> AdminSettingsResponse:
-    verify_admin_user(authorization)
-    response = supabase_admin_request(
+    await verify_admin_user_async(authorization)
+    response = await supabase_admin_request_async(
         "GET",
         "admin_settings?select=key,value,is_secret,updated_at&order=key.asc",
     )
@@ -3303,7 +3344,7 @@ async def admin_update_settings(
     request: AdminSettingsUpdate,
     authorization: str | None = Header(default=None),
 ) -> AdminSettingsResponse:
-    admin = verify_admin_user(authorization)
+    admin = await verify_admin_user_async(authorization)
     timestamp = now_iso()
     rows = [
         {
@@ -3318,13 +3359,13 @@ async def admin_update_settings(
     ]
     if rows:
         update_local_env_file({row["key"]: row["value"] or "" for row in rows})
-        supabase_admin_request(
+        await supabase_admin_request_async(
             "POST",
             "admin_settings",
             json_body=rows,
             prefer="resolution=merge-duplicates,return=minimal",
         )
-        write_audit_log(
+        await write_audit_log_async(
             admin,
             "settings.update",
             "admin_settings",
@@ -3338,8 +3379,8 @@ async def admin_update_settings(
 async def admin_list_audit_logs(
     authorization: str | None = Header(default=None),
 ) -> dict[str, list[AdminAuditLog]]:
-    verify_admin_user(authorization)
-    response = supabase_admin_request(
+    await verify_admin_user_async(authorization)
+    response = await supabase_admin_request_async(
         "GET",
         "admin_audit_logs?select=*&order=created_at.desc&limit=100",
     )
