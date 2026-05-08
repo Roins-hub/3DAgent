@@ -140,6 +140,40 @@ class CadamGenerationTests(unittest.TestCase):
         self.assertEqual(post.call_args.kwargs["timeout"], 45)
         self.assertIn("message.content", sent_payload["messages"][0]["content"])
 
+    def test_openai_cadam_uses_configured_token_budget_and_timeout(self):
+        with test_env(
+            {
+                "CADAM_LLM_PROVIDER": "openai",
+                "CADAM_OPENAI_MODEL": "gpt-5",
+                "CADAM_OPENAI_MAX_TOKENS": "8000",
+                "CADAM_OPENAI_TIMEOUT_SECONDS": "180",
+                "OPENAI_API_KEY": "test-openai-key",
+            }
+        ):
+            api = load_api()
+            request = api.CadamGenerateRequest(prompt="make a bracket")
+            payload = {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"name":"bracket","description":"bracket",'
+                                '"parameters":{"width":80,"height":50,"depth":40,"thickness":5,"holeDiameter":6},'
+                                '"scad":"module bracket(){cube([80,40,5]);} bracket();"}'
+                            )
+                        }
+                    }
+                ]
+            }
+
+            with patch.object(api.requests, "post", return_value=response_mock(payload)) as post:
+                result = api.call_openai_cadam_generation(request)
+
+        sent_payload = post.call_args.kwargs["json"]
+        self.assertEqual(result.model, "gpt-5")
+        self.assertEqual(sent_payload["max_tokens"], 8000)
+        self.assertEqual(post.call_args.kwargs["timeout"], 180)
+
     def test_cadam_endpoint_does_not_fall_back_to_openai_when_mimo_fails(self):
         with test_env({"OPENAI_API_KEY": "test-openai-key"}):
             api = load_api()

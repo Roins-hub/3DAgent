@@ -543,6 +543,24 @@ def cadam_openai_model() -> str:
     return runtime_setting_value("CADAM_OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
 
 
+def cadam_openai_max_tokens() -> int:
+    raw_value = runtime_setting_value("CADAM_OPENAI_MAX_TOKENS", "2200").strip()
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return 2200
+    return max(2200, min(value, 16000))
+
+
+def cadam_openai_timeout_seconds() -> int:
+    raw_value = runtime_setting_value("CADAM_OPENAI_TIMEOUT_SECONDS", "90").strip()
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return 90
+    return max(30, min(value, 300))
+
+
 def is_mimo_vision_model(model: str) -> bool:
     return model in {"mimo-v2.5", "mimo-v2-omni"}
 
@@ -1158,6 +1176,8 @@ def call_openai_cadam_generation(request: CadamGenerateRequest) -> CadamGenerate
         base_url=cadam_openai_base_url(),
         headers=openai_chat_headers(),
         provider="openai-compatible",
+        max_tokens=cadam_openai_max_tokens(),
+        timeout_seconds=cadam_openai_timeout_seconds(),
     )
 
 
