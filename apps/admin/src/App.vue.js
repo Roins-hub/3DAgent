@@ -127,6 +127,7 @@ const jobKindOptions = [
     { label: "全部类型", value: "" },
     { label: "三维", value: "3d" },
     { label: "图片", value: "image" },
+    { label: "CADAM", value: "cadam" },
 ];
 const jobStatusOptions = [
     { label: "全部状态", value: "" },
@@ -136,6 +137,15 @@ const jobStatusOptions = [
     { label: "已完成", value: "completed" },
     { label: "失败", value: "failed" },
 ];
+const jobKindLabel = (kind) => {
+    if (kind === "3d")
+        return "三维";
+    if (kind === "image")
+        return "图片";
+    if (kind === "cadam")
+        return "CADAM";
+    return kind;
+};
 function formatDate(value) {
     if (!value)
         return "-";
@@ -377,7 +387,7 @@ const jobColumns = [
         title: "类型",
         key: "kind",
         width: 90,
-        render: (row) => (row.kind === "3d" ? "三维" : "图片"),
+        render: (row) => jobKindLabel(row.kind),
     },
     {
         title: "状态",
