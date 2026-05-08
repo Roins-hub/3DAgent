@@ -24,12 +24,21 @@ function resolveNextPath(value: string | null) {
   if (!value || !value.startsWith("/") || value.startsWith("//")) {
     return "/";
   }
-
   return value;
 }
 
 function isValidPassword(value: string) {
-  return /[A-Za-z]/.test(value) && /\d/.test(value);
+  return value.length >= 6 && !/^\d+$/.test(value);
+}
+
+function formatSupabaseError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "object" && error !== null && "message" in error) {
+    return String((error as { message: unknown }).message);
+  }
+  return "未知错误";
 }
 
 export function RegisterShell() {
@@ -60,6 +69,18 @@ export function RegisterShell() {
     }
   }, [isSessionLoading, nextPath, router, session]);
 
+  useEffect(() => {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+
+    if (!supabaseUrl || !publishableKey) {
+      console.error("[Register] Supabase 环境变量未配置：", {
+        hasUrl: !!supabaseUrl,
+        hasKey: !!publishableKey,
+      });
+    }
+  }, []);
+
   function resetFeedback() {
     setError(null);
     setMessage(null);
@@ -71,8 +92,23 @@ export function RegisterShell() {
       return false;
     }
 
+    if (!email.trim()) {
+      setError("请输入邮箱地址");
+      return false;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("请输入有效的邮箱地址");
+      return false;
+    }
+
+    if (!password) {
+      setError("请输入密码");
+      return false;
+    }
+
     if (!isValidPassword(password)) {
-      setError("密码必须包含数字和英文字符");
+      setError("密码需至少6位，且不能是纯数字");
       return false;
     }
 
@@ -90,7 +126,9 @@ export function RegisterShell() {
     setIsSubmitting(true);
 
     try {
-      const { error: signUpError } = await supabase.auth.signUp({
+      console.info("[Register] 开始注册流程:", { username, email });
+
+      const { data, error: signUpError } = await supabase.auth.signUp({
         email: email.trim(),
         password,
         options: {
@@ -101,13 +139,34 @@ export function RegisterShell() {
       });
 
       if (signUpError) {
+        console.error("[Register] 注册失败:", signUpError);
         throw signUpError;
       }
 
+      console.info("[Register] 验证码发送成功:", {
+        userId: data?.user?.id,
+        email: data?.user?.email
+      });
+
       setRegisterStep("code");
-      setMessage("验证码已发送，请查看邮箱");
-    } catch {
-      setError("验证码发送失败，请检查邮箱");
+      setMessage("验证码已发送，请查看邮箱（包括垃圾邮件箱）");
+    } catch (err) {
+      const errorMessage = formatSupabaseError(err);
+      console.error("[Register] 注册错误详情:", err);
+
+      let userMessage = "注册失败，请稍后重试";
+
+      if (errorMessage.includes("email")) {
+        userMessage = "该邮箱已被注册，或邮箱格式不正确";
+      } else if (errorMessage.includes("password")) {
+        userMessage = "密码不符合要求，请使用更安全的密码";
+      } else if (errorMessage.includes("network")) {
+        userMessage = "网络连接失败，请检查网络后重试";
+      } else if (errorMessage.includes("rate limit")) {
+        userMessage = "请求过于频繁，请稍后再试";
+      }
+
+      setError(userMessage);
     } finally {
       setIsSubmitting(false);
     }
@@ -116,23 +175,68 @@ export function RegisterShell() {
   async function verifyRegisterCode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     resetFeedback();
+
+    if (!code.trim()) {
+      setError("请输入验证码");
+      return;
+    }
+
+    if (!/^\d{8}$/.test(code.trim())) {
+      setError("验证码必须是8位数字");
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
-      const { error: verifyError } = await supabase.auth.verifyOtp({
+      console.info("[Register] 开始验证验证码:", { email, codeLength: code.length });
+
+      const { data, error: verifyError } = await supabase.auth.verifyOtp({
         email: email.trim(),
         token: code.trim(),
         type: "signup",
       });
 
       if (verifyError) {
+        console.error("[Register] 验证码验证失败:", verifyError);
         throw verifyError;
       }
 
-      setMessage("注册成功，正在进入工作台");
-      router.replace(nextPath);
-    } catch {
-      setError("验证码验证失败，请重新输入");
+      console.info("[Register] 验证成功，开始保存用户名:", { userId: data?.user?.id, username });
+
+      const { error: updateError } = await supabase.auth.updateUser({
+        data: {
+          username: username.trim(),
+        },
+      });
+
+      if (updateError) {
+        console.error("[Register] 更新用户信息失败:", updateError);
+        throw updateError;
+      }
+
+      console.info("[Register] 用户信息更新成功");
+
+      setMessage("注册成功，正在进入工作台...");
+
+      setTimeout(() => {
+        router.replace(nextPath);
+      }, 1000);
+    } catch (err) {
+      const errorMessage = formatSupabaseError(err);
+      console.error("[Register] 验证错误详情:", err);
+
+      let userMessage = "验证码验证失败，请重新输入";
+
+      if (errorMessage.includes("expired")) {
+        userMessage = "验证码已过期，请重新获取";
+      } else if (errorMessage.includes("invalid")) {
+        userMessage = "验证码无效，请检查输入";
+      } else if (errorMessage.includes("network")) {
+        userMessage = "网络连接失败，请检查网络后重试";
+      }
+
+      setError(userMessage);
     } finally {
       setIsSubmitting(false);
     }
@@ -143,18 +247,32 @@ export function RegisterShell() {
     setIsSubmitting(true);
 
     try {
+      console.info("[Register] 重新发送验证码:", { email });
+
       const { error: resendError } = await supabase.auth.resend({
         type: "signup",
         email: email.trim(),
       });
 
       if (resendError) {
+        console.error("[Register] 重新发送失败:", resendError);
         throw resendError;
       }
 
       setMessage("验证码已重新发送，请查看邮箱");
-    } catch {
-      setError("验证码重新发送失败，请稍后再试");
+    } catch (err) {
+      const errorMessage = formatSupabaseError(err);
+      console.error("[Register] 重发错误详情:", err);
+
+      let userMessage = "验证码重新发送失败，请稍后再试";
+
+      if (errorMessage.includes("rate limit")) {
+        userMessage = "发送过于频繁，请稍后再试";
+      } else if (errorMessage.includes("network")) {
+        userMessage = "网络连接失败，请检查网络后重试";
+      }
+
+      setError(userMessage);
     } finally {
       setIsSubmitting(false);
     }
@@ -187,6 +305,7 @@ export function RegisterShell() {
               onChange={(event) => setUsername(event.target.value)}
               onFocus={() => setIsTyping(true)}
               onBlur={() => setIsTyping(false)}
+              placeholder="请输入用户名"
               required
             />
           </div>
@@ -201,6 +320,7 @@ export function RegisterShell() {
               onChange={(event) => setEmail(event.target.value)}
               onFocus={() => setIsTyping(true)}
               onBlur={() => setIsTyping(false)}
+              placeholder="example@email.com"
               required
             />
           </div>
@@ -210,24 +330,28 @@ export function RegisterShell() {
             <div className="relative">
               <Input
                 id="register-password"
-                type="text"
+                type={showPassword ? "text" : "password"}
                 autoComplete="new-password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 onFocus={() => setIsTyping(true)}
                 onBlur={() => setIsTyping(false)}
-                required
-                className={showPassword ? "pr-12" : "password-mask-input pr-12"}
-              />
-              <button
-                type="button"
-                aria-label={showPassword ? "隐藏密码" : "显示密码"}
-                onClick={() => setShowPassword((value) => !value)}
-                className="absolute right-3 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
-              >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
-            </div>
+                placeholder="至少6位，不能是纯数字"
+              required
+              className={showPassword ? "pr-12" : "password-mask-input pr-12"}
+            />
+            <button
+              type="button"
+              aria-label={showPassword ? "隐藏密码" : "显示密码"}
+              onClick={() => setShowPassword((value) => !value)}
+              className="absolute right-3 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            >
+              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            密码需至少6位，且不能是纯数字
+          </p>
           </div>
 
           <Button className="h-12 w-full text-base" disabled={isSubmitting} type="submit">
@@ -251,6 +375,7 @@ export function RegisterShell() {
               onChange={(event) => setCode(event.target.value)}
               onFocus={() => setIsTyping(true)}
               onBlur={() => setIsTyping(false)}
+              placeholder="请输入8位验证码"
               required
             />
           </div>
