@@ -4,7 +4,7 @@
 create table if not exists public.generation_jobs (
   id uuid primary key,
   user_id uuid not null references auth.users(id) on delete cascade,
-  kind text not null check (kind in ('3d', 'image')),
+  kind text not null check (kind in ('3d', 'image', 'cadam')),
   prompt text not null,
   mode text,
   status text not null check (status in ('queued', 'running', 'postprocessing', 'completed', 'failed')),
@@ -32,6 +32,31 @@ create index if not exists generation_jobs_admin_created_idx
 alter table public.generation_jobs
   add column if not exists deleted_at timestamptz,
   add column if not exists deleted_by uuid references auth.users(id) on delete set null;
+
+do $$
+declare
+  constraint_name text;
+begin
+  select con.conname into constraint_name
+  from pg_constraint con
+  join pg_class rel on rel.oid = con.conrelid
+  join pg_namespace nsp on nsp.oid = rel.relnamespace
+  where nsp.nspname = 'public'
+    and rel.relname = 'generation_jobs'
+    and con.contype = 'c'
+    and pg_get_constraintdef(con.oid) like '%kind%'
+    and pg_get_constraintdef(con.oid) like '%3d%'
+    and pg_get_constraintdef(con.oid) like '%image%'
+  limit 1;
+
+  if constraint_name is not null then
+    execute format('alter table public.generation_jobs drop constraint %I', constraint_name);
+  end if;
+
+  alter table public.generation_jobs
+    add constraint generation_jobs_kind_check
+    check (kind in ('3d', 'image', 'cadam'));
+end $$;
 
 create table if not exists public.admin_settings (
   key text primary key,

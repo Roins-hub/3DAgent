@@ -72,6 +72,15 @@ function statusLabel(status: string) {
   return labels[status] ?? status;
 }
 
+function jobKindLabel(kind: AdminGenerationJob["kind"]) {
+  const labels: Record<AdminGenerationJob["kind"], string> = {
+    "3d": "3D",
+    image: "图片",
+    cadam: "CADAM",
+  };
+  return labels[kind] ?? kind;
+}
+
 export function AdminConsole() {
   const [view, setView] = useState<AdminView>("overview");
   const [summary, setSummary] = useState<AdminSummary | null>(null);
@@ -328,7 +337,7 @@ export function AdminConsole() {
           <Panel title="生成记录">
             <div className="admin-filters">
               <label><Search size={15} /><input value={jobSearch} onChange={(event) => setJobSearch(event.target.value)} placeholder="搜索提示词" /></label>
-              <select value={jobKind} onChange={(event) => setJobKind(event.target.value)}><option value="">全部类型</option><option value="3d">3D</option><option value="image">图片</option></select>
+              <select value={jobKind} onChange={(event) => setJobKind(event.target.value)}><option value="">全部类型</option><option value="3d">3D</option><option value="image">图片</option><option value="cadam">CADAM</option></select>
               <select value={jobStatus} onChange={(event) => setJobStatus(event.target.value)}><option value="">全部状态</option><option value="queued">排队</option><option value="running">运行</option><option value="completed">完成</option><option value="failed">失败</option></select>
               <label className="admin-checkbox"><input checked={includeDeleted} onChange={(event) => setIncludeDeleted(event.target.checked)} type="checkbox" />含软删</label>
               <button onClick={() => void loadJobs()} type="button">筛选</button>
@@ -450,7 +459,7 @@ function JobsTable({
           {jobs.map((job) => (
             <tr key={job.id}>
               <td>
-                <strong>{job.kind === "3d" ? "3D" : "图片"} · {job.prompt}</strong>
+                <strong>{jobKindLabel(job.kind)} · {job.prompt}</strong>
                 <small>{job.id}</small>
               </td>
               <td>{job.userId}</td>

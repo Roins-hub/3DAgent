@@ -114,6 +114,90 @@ class AdminApiTests(unittest.TestCase):
         self.assertEqual(summary.imageJobs, 1)
         self.assertEqual(summary.modelJobs, 2)
 
+    def test_admin_generation_jobs_allows_cadam_filter(self):
+        with test_env():
+            api = load_api()
+            calls = []
+
+            def fake_admin_request(method, path, **kwargs):
+                calls.append((method, path, kwargs))
+                return response_mock(
+                    [
+                        {
+                            "id": "cadam-1",
+                            "user_id": "user-1",
+                            "kind": "cadam",
+                            "prompt": "make a bracket",
+                            "status": "completed",
+                            "progress": 100,
+                            "created_at": "2026-05-08T01:00:00+00:00",
+                            "updated_at": "2026-05-08T01:00:00+00:00",
+                        }
+                    ]
+                )
+
+            with (
+                patch.object(api, "verify_admin_user", return_value=api.AuthUser(id="admin-1", email="admin@example.com")),
+                patch.object(api, "supabase_admin_request", side_effect=fake_admin_request),
+            ):
+                result = asyncio.run(api.admin_list_generation_jobs(kind="cadam", authorization="Bearer token"))
+
+        self.assertEqual(result["jobs"][0]["kind"], "cadam")
+        self.assertIn("kind=eq.cadam", calls[0][1])
+
+    def test_admin_retry_cadam_job_creates_completed_cadam_history_row(self):
+        with test_env():
+            api = load_api()
+            calls = []
+            source_row = {
+                "id": "cadam-source",
+                "user_id": "user-1",
+                "kind": "cadam",
+                "prompt": "make a bracket",
+                "status": "completed",
+                "progress": 100,
+                "target_format": "scad",
+                "metadata": {"parameters": {"width": 96}},
+                "created_at": "2026-05-08T01:00:00+00:00",
+                "updated_at": "2026-05-08T01:00:00+00:00",
+            }
+            generated = api.CadamGenerateResponse(
+                name="motor_bracket",
+                description="bracket",
+                parameters={"width": 96},
+                scad="module motor_bracket(){cube([96,38,6]);} motor_bracket();",
+                provider="local-cadam",
+                model="parametric-cad-kernel",
+            )
+
+            def fake_admin_request(method, path, **kwargs):
+                calls.append((method, path, kwargs))
+                if method == "GET" and path.startswith("generation_jobs?id=eq."):
+                    return response_mock([source_row])
+                return response_mock([])
+
+            with (
+                patch.object(api, "verify_admin_user", return_value=api.AuthUser(id="admin-1", email="admin@example.com")),
+                patch.object(api, "supabase_admin_request", side_effect=fake_admin_request),
+                patch.object(api, "supabase_service_role_key", return_value="service-role"),
+                patch.object(api, "generate_cadam_response", return_value=generated),
+            ):
+                result = asyncio.run(
+                    api.admin_update_generation_job(
+                        "cadam-source",
+                        api.AdminGenerationJobAction(action="retry"),
+                        "Bearer token",
+                    )
+                )
+
+        inserted = next(call[2]["json_body"] for call in calls if call[0] == "POST" and call[1] == "generation_jobs")
+        self.assertEqual(result["job"]["kind"], "cadam")
+        self.assertEqual(inserted["kind"], "cadam")
+        self.assertEqual(inserted["status"], "completed")
+        self.assertEqual(inserted["progress"], 100)
+        self.assertEqual(inserted["metadata"]["retried_from"], "cadam-source")
+        self.assertEqual(inserted["metadata"]["scad"], generated.scad)
+
     def test_soft_restore_and_hard_delete_generation_job_write_audit_log(self):
         with test_env():
             api = load_api()
