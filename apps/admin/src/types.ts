@@ -12,6 +12,7 @@ export interface AdminSummary {
   totalJobs: number;
   modelJobs: number;
   imageJobs: number;
+  cadamJobs: number;
   failedJobs: number;
   runningJobs: number;
   completedJobs: number;
@@ -30,7 +31,7 @@ export interface AdminUser {
 export interface AdminGenerationJob {
   id: string;
   userId: string;
-  kind: "3d" | "image";
+  kind: "3d" | "image" | "cadam";
   prompt: string;
   mode: string | null;
   status: JobStatus;

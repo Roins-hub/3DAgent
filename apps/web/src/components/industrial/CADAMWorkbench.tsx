@@ -61,6 +61,7 @@ const initialSpec: CadSpec = {
 };
 
 const OPENSCAD_COMPILE_TIMEOUT_MS = 45_000;
+const OPENSCAD_INIT_TIMEOUT_MS = 20_000;
 let openScadPromise: Promise<OpenSCADInstance> | null = null;
 
 function clamp(value: number, min: number, max: number) {
@@ -268,7 +269,11 @@ ${spec.name}();`;
 }
 
 function getOpenScad() {
-  openScadPromise ??= import("openscad-wasm").then(async ({ createOpenSCAD }) => createOpenSCAD());
+  openScadPromise ??= withTimeout(
+    import("openscad-wasm").then(async ({ createOpenSCAD }) => createOpenSCAD()),
+    OPENSCAD_INIT_TIMEOUT_MS,
+    "OpenSCAD WASM 初始化超时，请刷新页面后重试。",
+  );
   return openScadPromise;
 }
 

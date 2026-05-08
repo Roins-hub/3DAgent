@@ -161,6 +161,7 @@ class AdminSummary(BaseModel):
     totalJobs: int
     modelJobs: int
     imageJobs: int
+    cadamJobs: int = 0
     failedJobs: int
     runningJobs: int
     completedJobs: int
@@ -947,6 +948,113 @@ def local_socket_head_screw_response(
     )
 
 
+def numeric_parameter(parameters: dict[str, Any], key: str, fallback: float) -> float:
+    value = parameters.get(key)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return fallback
+
+
+def local_parametric_cadam_response(request: CadamGenerateRequest) -> CadamGenerateResponse:
+    if is_cadam_fastener_prompt(request.prompt):
+        return local_socket_head_screw_response(request)
+
+    prompt = request.prompt.lower()
+    width = max(40.0, min(numeric_parameter(request.parameters, "width", 96.0), 180.0))
+    height = max(30.0, min(numeric_parameter(request.parameters, "height", 64.0), 160.0))
+    depth = max(8.0, min(numeric_parameter(request.parameters, "depth", 38.0), 110.0))
+    thickness = max(2.0, min(numeric_parameter(request.parameters, "thickness", 6.0), 20.0))
+    hole_diameter = max(3.0, min(numeric_parameter(request.parameters, "holeDiameter", 8.0), 36.0))
+    teeth = int(max(12, min(round(numeric_parameter(request.parameters, "teeth", 32.0)), 72)))
+
+    if any(token in prompt for token in ["gear", "齿轮"]):
+        name = "parametric_gear"
+        scad = f"""module {name}(outer_d={width:g}, thickness={depth:g}, bore={hole_diameter:g}, teeth={teeth}) {{
+  difference() {{
+    union() {{
+      cylinder(d=outer_d * 0.78, h=thickness, $fn=96);
+      for (i = [0:teeth-1]) {{
+        rotate([0, 0, i * 360 / teeth])
+          translate([outer_d * 0.42, 0, thickness / 2])
+            cube([outer_d * 0.12, outer_d * 0.055, thickness], center=true);
+      }}
+    }}
+    translate([0, 0, -1])
+      cylinder(d=bore, h=thickness + 2, $fn=64);
+  }}
+}}
+
+{name}();"""
+        description = "本地参数化齿轮"
+    elif any(token in prompt for token in ["flange", "法兰"]):
+        name = "mounting_flange"
+        scad = f"""module {name}(outer_d={width:g}, thickness={depth:g}, bore={width * 0.25:g}, hole_d={hole_diameter:g}, holes=6) {{
+  difference() {{
+    cylinder(d=outer_d, h=thickness, $fn=128);
+    translate([0, 0, -1])
+      cylinder(d=bore, h=thickness + 2, $fn=96);
+    for (i = [0:holes-1]) {{
+      rotate([0, 0, i * 360 / holes])
+        translate([outer_d * 0.34, 0, -1])
+          cylinder(d=hole_d, h=thickness + 2, $fn=48);
+    }}
+  }}
+}}
+
+{name}();"""
+        description = "本地参数化法兰连接盘"
+    elif any(token in prompt for token in ["enclosure", "case", "外壳", "盒"]):
+        name = "sensor_enclosure"
+        scad = f"""module {name}(w={width:g}, h={height:g}, d={depth:g}, wall={thickness:g}, hole_d={hole_diameter:g}) {{
+  difference() {{
+    cube([w, h, d], center=true);
+    translate([0, 0, wall])
+      cube([max(1, w - wall * 2), max(1, h - wall * 2), d], center=true);
+    for (x = [-1, 1], y = [-1, 1]) {{
+      translate([x * (w / 2 - 12), y * (h / 2 - 12), -d / 2 - 1])
+        cylinder(d=hole_d, h=d + 2, $fn=36);
+    }}
+  }}
+}}
+
+{name}();"""
+        description = "本地参数化传感器外壳"
+    else:
+        name = "motor_bracket"
+        scad = f"""module {name}(width={width:g}, height={height:g}, depth={depth:g}, thickness={thickness:g}, hole_diameter={hole_diameter:g}) {{
+  difference() {{
+    union() {{
+      cube([width, depth, thickness]);
+      cube([width, thickness, height]);
+    }}
+    for (x = [12, width - 12], y = [12, depth - 12]) {{
+      translate([x, y, -1])
+        cylinder(d=hole_diameter, h=thickness + 2, $fn=48);
+    }}
+  }}
+}}
+
+{name}();"""
+        description = "本地参数化安装支架"
+
+    return CadamGenerateResponse(
+        name=name,
+        description=description,
+        parameters={
+            **request.parameters,
+            "width": width,
+            "height": height,
+            "depth": depth,
+            "thickness": thickness,
+            "holeDiameter": hole_diameter,
+            "teeth": teeth,
+        },
+        scad=scad,
+        provider="local-cadam",
+        model="parametric-cad-kernel",
+    )
+
+
 def ensure_cadam_response_matches_prompt(
     request: CadamGenerateRequest,
     response: CadamGenerateResponse,
@@ -959,6 +1067,48 @@ def ensure_cadam_response_matches_prompt(
         return response
 
     return local_socket_head_screw_response(request)
+
+
+def generate_cadam_response(request: CadamGenerateRequest) -> CadamGenerateResponse:
+    provider = cadam_llm_provider()
+    if provider in {"cascade", "deepseek"}:
+        result: CadamGenerateResponse | None = None
+        for model in cadam_deepseek_models():
+            try:
+                result = call_deepseek_cadam_generation(request, model)
+                return ensure_cadam_response_matches_prompt(request, result)
+            except HTTPException:
+                if provider == "deepseek":
+                    continue
+
+        if provider == "cascade":
+            try:
+                result = call_mimo_cadam_generation(request)
+                return ensure_cadam_response_matches_prompt(request, result)
+            except HTTPException:
+                try:
+                    result = call_openai_cadam_generation(request)
+                    return ensure_cadam_response_matches_prompt(request, result)
+                except HTTPException:
+                    result = None
+
+        return result or local_parametric_cadam_response(request)
+
+    if provider == "openai":
+        try:
+            result = call_openai_cadam_generation(request)
+        except HTTPException:
+            result = local_parametric_cadam_response(request)
+        return ensure_cadam_response_matches_prompt(request, result)
+
+    if provider == "mimo":
+        try:
+            result = call_mimo_cadam_generation(request)
+        except HTTPException:
+            result = local_parametric_cadam_response(request)
+        return ensure_cadam_response_matches_prompt(request, result)
+
+    raise HTTPException(status_code=400, detail="CADAM_LLM_PROVIDER must be cascade, deepseek, mimo, or openai.")
 
 
 def repair_main_module_defaults(scad: str, parameters: dict[str, Any]) -> str:
@@ -1492,6 +1642,76 @@ def image_job_to_history_row(job: ImageJob, user_id: str) -> dict[str, Any]:
     }
 
 
+def cadam_response_to_history_row(
+    job_id: str,
+    request: CadamGenerateRequest,
+    response: CadamGenerateResponse,
+    user_id: str,
+    timestamp: str,
+) -> dict[str, Any]:
+    return {
+        "id": job_id,
+        "user_id": user_id,
+        "kind": "cadam",
+        "prompt": request.prompt.strip(),
+        "mode": None,
+        "status": "completed",
+        "progress": 100,
+        "quality": None,
+        "style": None,
+        "target_format": "scad",
+        "aspect_ratio": None,
+        "result_url": None,
+        "thumbnail_url": None,
+        "error": None,
+        "metadata": {
+            "name": response.name,
+            "description": response.description,
+            "provider": response.provider,
+            "model": response.model,
+            "parameters": response.parameters,
+            "scad": response.scad,
+        },
+        "created_at": timestamp,
+        "updated_at": timestamp,
+    }
+
+
+def failed_cadam_history_row(
+    job_id: str,
+    request: CadamGenerateRequest,
+    user_id: str,
+    timestamp: str,
+    error: str,
+) -> dict[str, Any]:
+    return {
+        "id": job_id,
+        "user_id": user_id,
+        "kind": "cadam",
+        "prompt": request.prompt.strip(),
+        "mode": None,
+        "status": "failed",
+        "progress": 0,
+        "quality": None,
+        "style": None,
+        "target_format": "scad",
+        "aspect_ratio": None,
+        "result_url": None,
+        "thumbnail_url": None,
+        "error": error,
+        "metadata": {"parameters": request.parameters},
+        "created_at": timestamp,
+        "updated_at": timestamp,
+    }
+
+
+def try_insert_cadam_history_row(row: dict[str, Any], authorization: str) -> None:
+    try:
+        insert_history_row(row, authorization)
+    except Exception as exc:
+        print(f"Supabase CADAM history insert skipped for job {row.get('id')}: {exc}")
+
+
 def history_row_to_generation_job(row: dict[str, Any]) -> GenerationJob:
     metadata = row.get("metadata")
     return GenerationJob(
@@ -1615,7 +1835,7 @@ def admin_list_generation_rows(
     limit: int = 100,
 ) -> list[dict[str, Any]]:
     filters = ["select=*", "order=created_at.desc", f"limit={max(1, min(limit, 500))}"]
-    if kind and kind in {"3d", "image"}:
+    if kind and kind in {"3d", "image", "cadam"}:
         filters.append(f"kind=eq.{kind}")
     if status:
         filters.append(f"status=eq.{quote(status)}")
@@ -2863,6 +3083,7 @@ async def admin_summary(authorization: str | None = Header(default=None)) -> Adm
         totalJobs=len(rows),
         modelJobs=sum(1 for row in rows if row.get("kind") == "3d"),
         imageJobs=sum(1 for row in rows if row.get("kind") == "image"),
+        cadamJobs=sum(1 for row in rows if row.get("kind") == "cadam"),
         failedJobs=failed_jobs,
         runningJobs=running_jobs,
         completedJobs=completed_jobs,
@@ -2948,12 +3169,6 @@ def retry_admin_generation(row: dict[str, Any], admin: AuthUser) -> dict[str, An
             "retried_from": row.get("id"),
         },
     }
-    supabase_admin_request(
-        "POST",
-        "generation_jobs",
-        json_body=retry_row,
-        prefer="return=minimal",
-    )
     service_authorization = f"Bearer {supabase_service_role_key()}"
     user = AuthUser(id=str(row.get("user_id") or ""))
     if row.get("kind") == "3d":
@@ -2988,6 +3203,29 @@ def retry_admin_generation(row: dict[str, Any], admin: AuthUser) -> dict[str, An
             asyncio.create_task(simulate_image_generation(job.id))
         else:
             asyncio.create_task(run_siliconflow_image_generation(job.id, request))
+    elif row.get("kind") == "cadam":
+        metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        parameters = metadata.get("parameters") if isinstance(metadata.get("parameters"), dict) else {}
+        request = CadamGenerateRequest(prompt=str(row.get("prompt") or ""), parameters=parameters)
+        try:
+            result = generate_cadam_response(request)
+            retry_row = cadam_response_to_history_row(new_id, request, result, str(row.get("user_id") or ""), timestamp)
+            retry_row["metadata"] = {
+                **(retry_row.get("metadata") if isinstance(retry_row.get("metadata"), dict) else {}),
+                "retried_from": row.get("id"),
+            }
+        except HTTPException as exc:
+            retry_row = failed_cadam_history_row(new_id, request, str(row.get("user_id") or ""), timestamp, str(exc.detail))
+            retry_row["metadata"] = {
+                **(retry_row.get("metadata") if isinstance(retry_row.get("metadata"), dict) else {}),
+                "retried_from": row.get("id"),
+            }
+    supabase_admin_request(
+        "POST",
+        "generation_jobs",
+        json_body=retry_row,
+        prefer="return=minimal",
+    )
     write_audit_log(admin, "generation_job.retry", "generation_job", target_id=str(row.get("id")), summary=f"new_id={new_id}")
     return retry_row
 
@@ -3165,56 +3403,33 @@ async def help_chat_stream(request: HelpChatRequest):
 
 
 @app.post("/api/cadam/generate", response_model=CadamGenerateResponse)
-async def cadam_generate(request: CadamGenerateRequest) -> CadamGenerateResponse:
+async def cadam_generate(
+    request: CadamGenerateRequest,
+    authorization: str | None = Header(default=None),
+) -> CadamGenerateResponse:
     if not request.prompt.strip():
         raise HTTPException(status_code=400, detail="Prompt is required.")
 
-    provider = cadam_llm_provider()
-    if provider in {"cascade", "deepseek"}:
-        failures: list[str] = []
-        for model in cadam_deepseek_models():
-            try:
-                result = await asyncio.to_thread(call_deepseek_cadam_generation, request, model)
-                return ensure_cadam_response_matches_prompt(request, result)
-            except HTTPException as exc:
-                failures.append(f"deepseek:{model}:{exc.status_code}")
-                if provider == "deepseek":
-                    continue
+    auth_header = authorization if isinstance(authorization, str) and authorization.strip() else None
+    user = verify_supabase_user(auth_header) if auth_header else None
+    job_id = str(uuid4())
+    timestamp = now_iso()
+    try:
+        result = await asyncio.to_thread(generate_cadam_response, request)
+    except HTTPException as exc:
+        if user and auth_header:
+            try_insert_cadam_history_row(
+                failed_cadam_history_row(job_id, request, user.id, timestamp, str(exc.detail)),
+                auth_header,
+            )
+        raise
 
-        if provider == "cascade":
-            try:
-                result = await asyncio.to_thread(call_mimo_cadam_generation, request)
-                return ensure_cadam_response_matches_prompt(request, result)
-            except HTTPException as exc:
-                failures.append(f"mimo:{cadam_chat_model()}:{exc.status_code}")
-
-            try:
-                result = await asyncio.to_thread(call_openai_cadam_generation, request)
-                return ensure_cadam_response_matches_prompt(request, result)
-            except HTTPException as exc:
-                failures.append(f"openai:{cadam_openai_model()}:{exc.status_code}")
-
-        if is_cadam_fastener_prompt(request.prompt):
-            return local_socket_head_screw_response(request)
-        raise HTTPException(status_code=502, detail=f"CADAM providers failed: {', '.join(failures)}")
-
-    if provider == "openai":
-        try:
-            result = await asyncio.to_thread(call_openai_cadam_generation, request)
-        except HTTPException:
-            if is_cadam_fastener_prompt(request.prompt):
-                return local_socket_head_screw_response(request)
-            raise
-        return ensure_cadam_response_matches_prompt(request, result)
-    if provider == "mimo":
-        try:
-            result = await asyncio.to_thread(call_mimo_cadam_generation, request)
-        except HTTPException:
-            if is_cadam_fastener_prompt(request.prompt):
-                return local_socket_head_screw_response(request)
-            raise
-        return ensure_cadam_response_matches_prompt(request, result)
-    raise HTTPException(status_code=400, detail="CADAM_LLM_PROVIDER must be cascade, deepseek, mimo, or openai.")
+    if user and auth_header:
+        try_insert_cadam_history_row(
+            cadam_response_to_history_row(job_id, request, result, user.id, timestamp),
+            auth_header,
+        )
+    return result
 
 
 @app.post("/api/jobs", response_model=GenerationJob)

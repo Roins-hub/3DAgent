@@ -174,7 +174,7 @@ class CadamGenerationTests(unittest.TestCase):
         self.assertEqual(sent_payload["max_tokens"], 8000)
         self.assertEqual(post.call_args.kwargs["timeout"], 180)
 
-    def test_cadam_endpoint_does_not_fall_back_to_openai_when_mimo_fails(self):
+    def test_cadam_endpoint_uses_local_cad_not_openai_when_mimo_fails(self):
         with test_env({"OPENAI_API_KEY": "test-openai-key"}):
             api = load_api()
             request = api.CadamGenerateRequest(prompt="????????")
@@ -189,10 +189,72 @@ class CadamGenerationTests(unittest.TestCase):
             ):
                 import asyncio
 
-                with self.assertRaises(api.HTTPException):
-                    asyncio.run(run_endpoint())
+                result = asyncio.run(run_endpoint())
 
+        self.assertEqual(result.provider, "local-cadam")
         openai_generate.assert_not_called()
+
+    def test_cadam_mimo_failure_returns_local_cad_for_general_prompt(self):
+        with test_env():
+            api = load_api()
+            request = api.CadamGenerateRequest(
+                prompt="make a motor bracket with four mounting holes",
+                parameters={"width": 96, "height": 64, "depth": 38, "thickness": 6, "holeDiameter": 8},
+            )
+
+            async def run_endpoint():
+                return await api.cadam_generate(request)
+
+            with patch.object(api, "call_mimo_cadam_generation", side_effect=api.HTTPException(status_code=502)):
+                import asyncio
+
+                result = asyncio.run(run_endpoint())
+
+        self.assertEqual(result.provider, "local-cadam")
+        self.assertIn("module", result.scad)
+        self.assertIn("cube", result.scad)
+        self.assertEqual(result.parameters["width"], 96)
+
+    def test_cadam_generate_persists_authenticated_result_to_history(self):
+        with test_env():
+            api = load_api()
+            request = api.CadamGenerateRequest(
+                prompt="make a motor bracket",
+                parameters={"width": 96, "height": 64, "depth": 38},
+            )
+            generated = api.CadamGenerateResponse(
+                name="motor_bracket",
+                description="bracket",
+                parameters={"width": 96, "height": 64, "depth": 38},
+                scad="module motor_bracket(){cube([96,38,6]);} motor_bracket();",
+                provider="openai-compatible",
+                model="gpt-4o-mini",
+            )
+
+            async def run_endpoint():
+                return await api.cadam_generate(request, "Bearer token")
+
+            with (
+                patch.object(api, "verify_supabase_user", return_value=api.AuthUser(id="user-1", email="u@example.com")),
+                patch.object(api, "call_mimo_cadam_generation", return_value=generated),
+                patch.object(api, "insert_history_row") as insert_history,
+            ):
+                import asyncio
+
+                result = asyncio.run(run_endpoint())
+
+        self.assertEqual(result.name, "motor_bracket")
+        insert_history.assert_called_once()
+        row, authorization = insert_history.call_args.args
+        self.assertEqual(authorization, "Bearer token")
+        self.assertEqual(row["user_id"], "user-1")
+        self.assertEqual(row["kind"], "cadam")
+        self.assertEqual(row["status"], "completed")
+        self.assertEqual(row["progress"], 100)
+        self.assertEqual(row["target_format"], "scad")
+        self.assertEqual(row["metadata"]["provider"], "openai-compatible")
+        self.assertEqual(row["metadata"]["model"], "gpt-4o-mini")
+        self.assertEqual(row["metadata"]["scad"], generated.scad)
 
     def test_cadam_fastener_prompt_overrides_wrong_llm_shape(self):
         with test_env({"CADAM_LLM_PROVIDER": "openai", "OPENAI_API_KEY": "test-openai-key"}):
