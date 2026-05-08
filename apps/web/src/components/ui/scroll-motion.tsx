@@ -2,9 +2,20 @@
 
 import { motion, useReducedMotion } from "framer-motion";
 import { Layers3, WandSparkles } from "lucide-react";
+import { useSyncExternalStore } from "react";
 import { cn } from "@/lib/utils";
 
 const easeOut = [0.16, 1, 0.3, 1] as const;
+
+const emptySubscribe = () => () => {};
+
+function getServerSnapshot() {
+  return false;
+}
+
+function getSnapshot() {
+  return true;
+}
 
 type RevealProps = {
   children: React.ReactNode;
@@ -20,11 +31,12 @@ export function Reveal({
   as = "div",
 }: RevealProps) {
   const reduceMotion = useReducedMotion();
+  const isHydrated = useSyncExternalStore(emptySubscribe, getSnapshot, getServerSnapshot);
   const Component = motion[as];
 
   return (
     <Component
-      initial={reduceMotion ? false : { opacity: 0, y: 34, filter: "blur(10px)" }}
+      initial={isHydrated && !reduceMotion ? { opacity: 0, y: 34, filter: "blur(10px)" } : false}
       whileInView={
         reduceMotion
           ? { opacity: 1 }
@@ -49,18 +61,19 @@ export function AnimatedStudioObject({
   delay?: number;
 }) {
   const reduceMotion = useReducedMotion();
+  const isHydrated = useSyncExternalStore(emptySubscribe, getSnapshot, getServerSnapshot);
 
   return (
     <motion.div
       className={cn("studio-object motion-studio-object", dark && "motion-studio-object--dark")}
       aria-hidden="true"
-      initial={reduceMotion ? false : { opacity: 0, y: 54, scale: 0.94 }}
+      initial={isHydrated && !reduceMotion ? { opacity: 0, y: 54, scale: 0.94 } : false}
       whileInView={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
       viewport={{ once: true, amount: 0.35 }}
       transition={{ delay, duration: 1.05, ease: easeOut }}
     >
       <motion.strong
-        initial={reduceMotion ? false : { opacity: 0, y: 16, scale: 0.96 }}
+        initial={isHydrated && !reduceMotion ? { opacity: 0, y: 16, scale: 0.96 } : false}
         whileInView={
           reduceMotion
             ? { opacity: 1 }
@@ -83,13 +96,13 @@ export function AnimatedStudioObject({
           key={index}
           className={`studio-card-line studio-card-line-${index + 1}`}
           initial={
-            reduceMotion
-              ? false
-              : {
+            isHydrated && !reduceMotion
+              ? {
                   opacity: 0,
                   scale: 0.72,
                   rotate: index === 0 ? -32 : index === 1 ? 26 : -14,
                 }
+              : false
           }
           whileInView={
             reduceMotion
@@ -126,19 +139,20 @@ export function AnimatedStudioObject({
 
 export function AnimatedClosingMark() {
   const reduceMotion = useReducedMotion();
+  const isHydrated = useSyncExternalStore(emptySubscribe, getSnapshot, getServerSnapshot);
 
   return (
     <motion.div
       className="closing-mark motion-closing-mark"
       aria-hidden="true"
-      initial={reduceMotion ? false : { opacity: 0, scale: 0.9, y: 36 }}
+      initial={isHydrated && !reduceMotion ? { opacity: 0, scale: 0.9, y: 36 } : false}
       whileInView={reduceMotion ? { opacity: 1 } : { opacity: 1, scale: 1, y: 0 }}
       viewport={{ once: true, amount: 0.45 }}
       transition={{ duration: 1.05, ease: easeOut }}
     >
       <motion.div
         className="closing-mark-layer"
-        initial={reduceMotion ? false : { opacity: 0, scale: 0.8 }}
+        initial={isHydrated && !reduceMotion ? { opacity: 0, scale: 0.8 } : false}
         whileInView={reduceMotion ? { opacity: 1 } : { opacity: 1, scale: [1, 1.12, 1] }}
         viewport={{ once: true, amount: 0.45 }}
         transition={{
@@ -153,7 +167,7 @@ export function AnimatedClosingMark() {
       </motion.div>
       <motion.div
         className="closing-mark-wand"
-        initial={reduceMotion ? false : { opacity: 0, x: -18, y: 18, rotate: -12 }}
+        initial={isHydrated && !reduceMotion ? { opacity: 0, x: -18, y: 18, rotate: -12 } : false}
         whileInView={
           reduceMotion
             ? { opacity: 1 }
