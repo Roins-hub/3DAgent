@@ -1,7 +1,20 @@
 import { supabase } from "./supabase";
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ||
-    import.meta.env.NEXT_PUBLIC_API_BASE_URL ||
-    "http://localhost:8016";
+import { apiBaseUrlCandidates, normalizeApiBaseUrl } from "@3dagent/shared";
+export const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL || import.meta.env.NEXT_PUBLIC_API_BASE_URL);
+let activeApiBaseUrl = API_BASE_URL;
+function browserHostname() {
+    return typeof window === "undefined" ? undefined : window.location.hostname;
+}
+function apiBaseUrls() {
+    return apiBaseUrlCandidates(API_BASE_URL, browserHostname());
+}
+function apiUrl(path, baseUrl = activeApiBaseUrl) {
+    return `${baseUrl}${path}`;
+}
+function connectionErrorMessage(error) {
+    const message = error instanceof Error ? error.message : "";
+    return `Cannot connect to backend ${apiBaseUrls().join(" or ")}. Please confirm FastAPI is running.${message ? ` (${message})` : ""}`;
+}
 async function getAuthHeaders() {
     const { data: { session }, } = await supabase.auth.getSession();
     return session?.access_token
@@ -10,14 +23,28 @@ async function getAuthHeaders() {
 }
 async function request(path, init) {
     const authHeaders = await getAuthHeaders();
-    const response = await fetch(`${API_BASE_URL}${path}`, {
-        ...init,
-        headers: {
-            "Content-Type": "application/json",
-            ...authHeaders,
-            ...init?.headers,
-        },
-    });
+    let response = null;
+    let lastConnectionError = null;
+    for (const baseUrl of apiBaseUrls()) {
+        try {
+            response = await fetch(apiUrl(path, baseUrl), {
+                ...init,
+                headers: {
+                    "Content-Type": "application/json",
+                    ...authHeaders,
+                    ...init?.headers,
+                },
+            });
+            activeApiBaseUrl = baseUrl;
+            break;
+        }
+        catch (error) {
+            lastConnectionError = error;
+        }
+    }
+    if (!response) {
+        throw new Error(connectionErrorMessage(lastConnectionError));
+    }
     if (!response.ok) {
         const body = await response.json().catch(() => null);
         throw new Error(body?.detail ?? `请求失败：${response.status}`);

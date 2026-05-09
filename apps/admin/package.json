@@ -9,6 +9,7 @@
     "lint": "vue-tsc -b --pretty false"
   },
   "dependencies": {
+    "@3dagent/shared": "1.0.0",
     "@supabase/supabase-js": "^2.105.0",
     "@vicons/ionicons5": "^0.13.0",
     "naive-ui": "^2.43.4",
