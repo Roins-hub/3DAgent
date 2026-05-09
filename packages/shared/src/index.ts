@@ -58,3 +58,11 @@ export interface ImageJob {
   imageUrl: string | null;
   error: string | null;
 }
+
+export {
+  DEFAULT_API_BASE_URL,
+  DESKTOP_API_FALLBACK_BASE_URL,
+  apiBaseUrlCandidates,
+  isLocalHostname,
+  normalizeApiBaseUrl,
+} from "./api-routing";

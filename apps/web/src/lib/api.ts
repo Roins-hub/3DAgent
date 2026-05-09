@@ -5,10 +5,28 @@ import type {
   ImageJob,
   JobStatus,
 } from "@3dagent/shared";
+import { apiBaseUrlCandidates, normalizeApiBaseUrl } from "@3dagent/shared";
 import { getAuthHeaders } from "@/lib/supabase";
 
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8016";
+export const API_BASE_URL = normalizeApiBaseUrl(process.env.NEXT_PUBLIC_API_BASE_URL);
+let activeApiBaseUrl = API_BASE_URL;
+
+function browserHostname() {
+  return typeof window === "undefined" ? undefined : window.location.hostname;
+}
+
+function apiBaseUrls() {
+  return apiBaseUrlCandidates(API_BASE_URL, browserHostname());
+}
+
+function apiUrl(path: string, baseUrl = activeApiBaseUrl) {
+  return `${baseUrl}${path}`;
+}
+
+function connectionErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  return `Cannot connect to backend ${apiBaseUrls().join(" or ")}. Please confirm FastAPI is running.${message ? ` (${message})` : ""}`;
+}
 
 function formatApiError(status: number, detail: unknown) {
   if (typeof detail === "string" && detail.trim()) {
@@ -133,21 +151,28 @@ export type HelpChatStreamOptions = {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const authHeaders = await getAuthHeaders();
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      ...init,
-      headers: {
-        "Content-Type": "application/json",
-        ...authHeaders,
-        ...init?.headers,
-      },
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "";
-    throw new Error(
-      `无法连接后端 ${API_BASE_URL}。请确认 FastAPI 已在 8016 启动。${message ? `（${message}）` : ""}`,
-    );
+  let response: Response | null = null;
+  let lastConnectionError: unknown = null;
+
+  for (const baseUrl of apiBaseUrls()) {
+    try {
+      response = await fetch(apiUrl(path, baseUrl), {
+        ...init,
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders,
+          ...init?.headers,
+        },
+      });
+      activeApiBaseUrl = baseUrl;
+      break;
+    } catch (error) {
+      lastConnectionError = error;
+    }
+  }
+
+  if (!response) {
+    throw new Error(connectionErrorMessage(lastConnectionError));
   }
 
   if (!response.ok) {
@@ -163,7 +188,7 @@ export const api = {
   listJobs: () => request<GenerationJob[]>("/api/jobs"),
   getJob: (jobId: string) => request<GenerationJob>(`/api/jobs/${jobId}`),
   modelUrl: (jobId: string, format?: string) =>
-    `${API_BASE_URL}/api/jobs/${jobId}/model${
+    `${activeApiBaseUrl}/api/jobs/${jobId}/model${
       format ? `?format=${encodeURIComponent(format)}` : ""
     }`,
   createJob: (payload: CreateJobRequest) =>
@@ -173,7 +198,7 @@ export const api = {
     }),
   listImageJobs: () => request<ImageJob[]>("/api/image-jobs"),
   getImageJob: (jobId: string) => request<ImageJob>(`/api/image-jobs/${jobId}`),
-  imageUrl: (jobId: string) => `${API_BASE_URL}/api/image-jobs/${jobId}/image`,
+  imageUrl: (jobId: string) => `${activeApiBaseUrl}/api/image-jobs/${jobId}/image`,
   createImageJob: (payload: CreateImageJobRequest) =>
     request<ImageJob>("/api/image-jobs", {
       method: "POST",
@@ -234,14 +259,29 @@ export const api = {
   adminAuditLogs: () => request<{ logs: AdminAuditLog[] }>("/api/admin/audit-logs"),
   helpChatStream: async (payload: HelpChatRequest, options: HelpChatStreamOptions) => {
     const authHeaders = await getAuthHeaders();
-    const response = await fetch(`${API_BASE_URL}/api/help-chat/stream`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...authHeaders,
-      },
-      body: JSON.stringify(payload),
-    });
+    let response: Response | null = null;
+    let lastConnectionError: unknown = null;
+
+    for (const baseUrl of apiBaseUrls()) {
+      try {
+        response = await fetch(apiUrl("/api/help-chat/stream", baseUrl), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...authHeaders,
+          },
+          body: JSON.stringify(payload),
+        });
+        activeApiBaseUrl = baseUrl;
+        break;
+      } catch (error) {
+        lastConnectionError = error;
+      }
+    }
+
+    if (!response) {
+      throw new Error(connectionErrorMessage(lastConnectionError));
+    }
 
     if (!response.ok) {
       const body = await response.json().catch(() => null);
