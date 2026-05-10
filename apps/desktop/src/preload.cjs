@@ -13,3 +13,15 @@ contextBridge.exposeInMainWorld("desktopNavigation", {
     return () => ipcRenderer.removeListener("desktop:navigation-state", listener);
   },
 });
+
+contextBridge.exposeInMainWorld("desktopUpdater", {
+  getStatus: () => ipcRenderer.invoke("desktop:update-status"),
+  check: () => ipcRenderer.invoke("desktop:update-check"),
+  download: () => ipcRenderer.invoke("desktop:update-download"),
+  install: () => ipcRenderer.invoke("desktop:update-install"),
+  onStatusChange: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on("desktop:update-status", listener);
+    return () => ipcRenderer.removeListener("desktop:update-status", listener);
+  },
+});
