@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain } = require("electron");
 const { spawn } = require("child_process");
+const { autoUpdater } = require("electron-updater");
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
@@ -8,14 +9,53 @@ const WEB_PORT = Number(process.env.DESKTOP_WEB_PORT || 39281);
 const API_PORT = Number(process.env.DESKTOP_API_PORT || 39282);
 const WEB_URL = process.env.DESKTOP_WEB_URL || `http://127.0.0.1:${WEB_PORT}`;
 const API_URL = process.env.NEXT_PUBLIC_API_BASE_URL || `http://127.0.0.1:${API_PORT}`;
+const UPDATE_FEED_URL =
+  process.env.THREEDAGENT_UPDATE_FEED_URL ||
+  "https://3dagent-updates-1411701740.cos.ap-guangzhou.myqcloud.com/3dagent/win/";
 
 const processes = [];
 let mainWindow;
+let updateStatus = {
+  status: "idle",
+  currentVersion: app.getVersion(),
+  feedUrl: UPDATE_FEED_URL,
+};
+
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = false;
+autoUpdater.setFeedURL({
+  provider: "generic",
+  url: UPDATE_FEED_URL,
+});
 
 function desktopWebUrl() {
   const url = new URL(WEB_URL);
   url.searchParams.set("__desktop", "1");
   return url.toString();
+}
+
+function normalizeUpdateInfo(info = {}) {
+  return {
+    version: info.version,
+    releaseName: info.releaseName,
+    releaseDate: info.releaseDate,
+    releaseNotes: info.releaseNotes,
+  };
+}
+
+function sendUpdateStatus(status) {
+  updateStatus = {
+    ...updateStatus,
+    ...status,
+    currentVersion: app.getVersion(),
+    feedUrl: UPDATE_FEED_URL,
+  };
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("desktop:update-status", updateStatus);
+  }
+
+  return updateStatus;
 }
 
 function repoRoot() {
@@ -190,6 +230,94 @@ ipcMain.handle("desktop:navigate", (event, action) => {
     canGoBack: contents.canGoBack(),
     canGoForward: contents.canGoForward(),
   };
+});
+
+ipcMain.handle("desktop:update-status", () => updateStatus);
+
+ipcMain.handle("desktop:update-check", async () => {
+  if (!app.isPackaged) {
+    return sendUpdateStatus({
+      status: "unsupported",
+      message: "开发模式下无法检查安装包更新，请在打包安装后测试。",
+    });
+  }
+
+  sendUpdateStatus({ status: "checking", message: null });
+  await autoUpdater.checkForUpdates();
+  return updateStatus;
+});
+
+ipcMain.handle("desktop:update-download", async () => {
+  if (!app.isPackaged) {
+    return sendUpdateStatus({
+      status: "unsupported",
+      message: "开发模式下无法下载安装包更新，请在打包安装后测试。",
+    });
+  }
+
+  sendUpdateStatus({ status: "downloading", percent: 0, message: null });
+  await autoUpdater.downloadUpdate();
+  return updateStatus;
+});
+
+ipcMain.handle("desktop:update-install", () => {
+  if (updateStatus.status !== "downloaded") {
+    return sendUpdateStatus({
+      status: "error",
+      message: "更新尚未下载完成。",
+    });
+  }
+
+  sendUpdateStatus({ status: "installing", message: "正在重启并安装更新。" });
+  autoUpdater.quitAndInstall(false, true);
+  return updateStatus;
+});
+
+autoUpdater.on("checking-for-update", () => {
+  sendUpdateStatus({ status: "checking", message: null });
+});
+
+autoUpdater.on("update-available", (info) => {
+  sendUpdateStatus({
+    status: "available",
+    updateInfo: normalizeUpdateInfo(info),
+    message: null,
+  });
+});
+
+autoUpdater.on("update-not-available", (info) => {
+  sendUpdateStatus({
+    status: "not-available",
+    updateInfo: normalizeUpdateInfo(info),
+    message: "当前已是最新版本。",
+  });
+});
+
+autoUpdater.on("download-progress", (progress) => {
+  sendUpdateStatus({
+    status: "downloading",
+    percent: Math.round(progress.percent || 0),
+    transferred: progress.transferred,
+    total: progress.total,
+    bytesPerSecond: progress.bytesPerSecond,
+    message: null,
+  });
+});
+
+autoUpdater.on("update-downloaded", (info) => {
+  sendUpdateStatus({
+    status: "downloaded",
+    percent: 100,
+    updateInfo: normalizeUpdateInfo(info),
+    message: "更新已下载完成。",
+  });
+});
+
+autoUpdater.on("error", (error) => {
+  sendUpdateStatus({
+    status: "error",
+    message: error instanceof Error ? error.message : String(error),
+  });
 });
 
 async function boot() {

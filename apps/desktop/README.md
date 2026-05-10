@@ -24,3 +24,25 @@ The production build expects PyInstaller to be available. If it is not already i
 ```
 
 The installer output is written to `apps/desktop/dist`.
+
+## Updates
+
+Desktop updates use `electron-updater` with a Tencent COS generic feed:
+
+```text
+https://3dagent-updates-1411701740.cos.ap-guangzhou.myqcloud.com/3dagent/win/
+```
+
+For each release, bump `apps/desktop/package.json` version, run:
+
+```powershell
+npm run build:desktop
+```
+
+Then upload these files from `apps/desktop/dist` to the COS `3dagent/win/` directory:
+
+```text
+latest.yml
+3DAgent Setup <version>.exe
+3DAgent Setup <version>.exe.blockmap
+```

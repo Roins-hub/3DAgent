@@ -7,6 +7,7 @@ dist
 apps/api/generated
 apps/api/build
 apps/api/*.spec
+apps/desktop/resources
 .env
 .env.local
 SecretKey.csv

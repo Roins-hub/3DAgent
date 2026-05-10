@@ -1,6 +1,6 @@
 {
   "name": "@3dagent/desktop",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "private": true,
   "main": "src/main.cjs",
   "scripts": {
@@ -22,6 +22,7 @@
     },
     "files": [
       "src/**/*",
+      "!src/**/*.test.cjs",
       "package.json"
     ],
     "extraResources": [
@@ -72,6 +73,15 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://3dagent-updates-1411701740.cos.ap-guangzhou.myqcloud.com/3dagent/win/"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.3"
   }
 }

@@ -16,6 +16,7 @@ import { AuthSplitPage } from "@/components/ui/animated-characters-auth-page";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { isDuplicateSignUpResult } from "@/lib/auth-utils";
 import { getSupabaseClient } from "@/lib/supabase";
 
 type RegisterStep = "details" | "code";
@@ -143,6 +144,11 @@ export function RegisterShell() {
         throw signUpError;
       }
 
+      if (isDuplicateSignUpResult(data)) {
+        setError("该邮箱已经注册，请直接登录或换一个邮箱。");
+        return;
+      }
+
       console.info("[Register] 验证码发送成功:", {
         userId: data?.user?.id,
         email: data?.user?.email
@@ -156,7 +162,9 @@ export function RegisterShell() {
 
       let userMessage = "注册失败，请稍后重试";
 
-      if (errorMessage.includes("email")) {
+      if (errorMessage.toLowerCase().includes("already") || errorMessage.toLowerCase().includes("registered")) {
+        userMessage = "该邮箱已经注册，请直接登录或换一个邮箱。";
+      } else if (errorMessage.includes("email")) {
         userMessage = "该邮箱已被注册，或邮箱格式不正确";
       } else if (errorMessage.includes("password")) {
         userMessage = "密码不符合要求，请使用更安全的密码";
