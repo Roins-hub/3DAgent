@@ -2,6 +2,7 @@ import importlib
 import asyncio
 import os
 import tempfile
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -459,6 +460,37 @@ class HistoryPersistenceTests(unittest.TestCase):
         self.assertIsNotNone(updated)
         self.assertEqual(updated.status, "running")
         self.assertEqual(updated.progress, 35)
+
+    def test_image_progress_persistence_does_not_block_job_update(self):
+        with test_env():
+            api = load_api()
+            job = api.ImageJob(
+                id="45454545-4545-4545-4545-454545454545",
+                prompt="Generate a preview",
+                status="queued",
+                progress=0,
+                aspectRatio="1:1",
+                createdAt="2026-04-28T00:00:00+00:00",
+                updatedAt="2026-04-28T00:00:00+00:00",
+                imageUrl=None,
+                error=None,
+            )
+            api.image_jobs[job.id] = job
+            api.job_contexts[job.id] = {
+                "user_id": "user-1",
+                "authorization": "Bearer test-token",
+            }
+
+            def slow_patch(*_args, **_kwargs):
+                time.sleep(1)
+
+            with patch.object(api, "patch_history_row", side_effect=slow_patch):
+                started = time.perf_counter()
+                updated = api.update_image_job(job.id, status="running", progress=35)
+                elapsed = time.perf_counter() - started
+
+        self.assertIsNotNone(updated)
+        self.assertLess(elapsed, 0.25)
 
     def test_help_reply_explains_cad_parameter_to_modeling_flow(self):
         with test_env():

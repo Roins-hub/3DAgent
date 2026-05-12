@@ -79,6 +79,10 @@ function formatTime(value: string) {
   }).format(new Date(value));
 }
 
+function isBackendConnectionError(value: string | null) {
+  return Boolean(value?.startsWith("Cannot connect to backend"));
+}
+
 export function ImageStudioShell() {
   const searchParams = useSearchParams();
   const imageType = getImageType(searchParams.get("type"));
@@ -148,9 +152,11 @@ export function ImageStudioShell() {
           setJobs((items) =>
             items.map((item) => (item.id === nextJob.id ? nextJob : item)),
           );
+          setError((current) => (isBackendConnectionError(current) ? null : current));
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "图片任务轮询失败");
+        const message = err instanceof Error ? err.message : "图片任务轮询失败";
+        setError((current) => current ?? message);
       }
     };
 

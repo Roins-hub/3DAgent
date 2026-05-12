@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -277,6 +278,9 @@ image_jobs: dict[str, ImageJob] = {}
 job_contexts: dict[str, dict[str, str]] = {}
 auth_user_cache: dict[str, tuple[float, AuthUser]] = {}
 admin_settings_cache: tuple[float, dict[str, dict[str, Any]]] | None = None
+persistence_executor = ThreadPoolExecutor(
+    max_workers=int(os.environ.get("THREEDAGENT_PERSISTENCE_WORKERS", "4"))
+)
 DEMO_MODEL_PATH = Path(
     os.environ.get(
         "THREEDAGENT_DEMO_MODEL_PATH",
@@ -1538,6 +1542,22 @@ def verify_supabase_user(authorization: str | None) -> AuthUser:
     return user
 
 
+async def verify_supabase_user_async(authorization: str | None) -> AuthUser:
+    return await asyncio.to_thread(verify_supabase_user, authorization)
+
+
+async def list_history_rows_async(kind: str, authorization: str, limit: int = 20) -> list[dict[str, Any]]:
+    return await asyncio.to_thread(list_history_rows, kind, authorization, limit)
+
+
+async def get_history_row_async(job_id: str, kind: str, authorization: str) -> dict[str, Any] | None:
+    return await asyncio.to_thread(get_history_row, job_id, kind, authorization)
+
+
+async def insert_history_row_async(row: dict[str, Any], authorization: str) -> None:
+    await asyncio.to_thread(insert_history_row, row, authorization)
+
+
 def admin_email_allowlist() -> set[str]:
     raw_value = os.getenv("ADMIN_EMAIL_ALLOWLIST", "")
     return {
@@ -1972,6 +1992,18 @@ def register_job_context(job_id: str, user: AuthUser, authorization: str) -> Non
     job_contexts[job_id] = {"user_id": user.id, "authorization": authorization}
 
 
+def submit_persistence_update(label: str, callback: Any) -> None:
+    future = persistence_executor.submit(callback)
+
+    def report_error(done_future: Any) -> None:
+        try:
+            done_future.result()
+        except Exception as exc:
+            print(f"{label}: {exc}")
+
+    future.add_done_callback(report_error)
+
+
 def persist_job_update(job_id: str, updates: dict[str, Any]) -> None:
     context = job_contexts.get(job_id)
     if not context:
@@ -1991,10 +2023,10 @@ def persist_job_update(job_id: str, updates: dict[str, Any]) -> None:
     if "metadata" in updates:
         metadata = updates["metadata"]
         row_updates["metadata"] = metadata.model_dump() if metadata else None
-    try:
-        patch_history_row(job_id, row_updates, context["authorization"])
-    except Exception as exc:
-        print(f"Supabase history update skipped for job {job_id}: {exc}")
+    submit_persistence_update(
+        f"Supabase history update skipped for job {job_id}",
+        lambda: patch_history_row(job_id, row_updates, context["authorization"]),
+    )
 
 
 def persist_image_job_update(job_id: str, updates: dict[str, Any]) -> None:
@@ -2012,10 +2044,10 @@ def persist_image_job_update(job_id: str, updates: dict[str, Any]) -> None:
     for source_key, row_key in field_map.items():
         if source_key in updates:
             row_updates[row_key] = updates[source_key]
-    try:
-        patch_history_row(job_id, row_updates, context["authorization"])
-    except Exception as exc:
-        print(f"Supabase image history update skipped for job {job_id}: {exc}")
+    submit_persistence_update(
+        f"Supabase image history update skipped for job {job_id}",
+        lambda: patch_history_row(job_id, row_updates, context["authorization"]),
+    )
 
 
 def update_job(job_id: str, **updates: Any) -> GenerationJob | None:
@@ -3512,7 +3544,7 @@ async def create_image_job(
     request: CreateImageJobRequest,
     authorization: str | None = Header(default=None),
 ) -> ImageJob:
-    user = verify_supabase_user(authorization)
+    user = await verify_supabase_user_async(authorization)
     assert authorization is not None
     prompt = request.prompt.strip()
     if not prompt:
@@ -3547,7 +3579,7 @@ async def create_image_job(
         imageUrl=None,
         error=None,
     )
-    insert_history_row(image_job_to_history_row(job, user.id), authorization)
+    await insert_history_row_async(image_job_to_history_row(job, user.id), authorization)
     image_jobs[job.id] = job
     register_job_context(job.id, user, authorization)
 
@@ -3560,9 +3592,10 @@ async def create_image_job(
 
 @app.get("/api/image-jobs", response_model=list[ImageJob])
 async def list_image_jobs(authorization: str | None = Header(default=None)) -> list[ImageJob]:
-    verify_supabase_user(authorization)
+    await verify_supabase_user_async(authorization)
     assert authorization is not None
-    return [history_row_to_image_job(row) for row in list_history_rows("image", authorization)]
+    rows = await list_history_rows_async("image", authorization)
+    return [history_row_to_image_job(row) for row in rows]
 
 
 @app.get("/api/image-jobs/{job_id}", response_model=ImageJob)
@@ -3570,9 +3603,9 @@ async def get_image_job(
     job_id: str,
     authorization: str | None = Header(default=None),
 ) -> ImageJob:
-    verify_supabase_user(authorization)
+    await verify_supabase_user_async(authorization)
     assert authorization is not None
-    row = get_history_row(job_id, "image", authorization)
+    row = await get_history_row_async(job_id, "image", authorization)
     if row is None:
         raise HTTPException(status_code=404, detail="Image job not found.")
     return history_row_to_image_job(row)
@@ -3583,9 +3616,9 @@ async def get_image_job_image(
     job_id: str,
     authorization: str | None = Header(default=None),
 ):
-    verify_supabase_user(authorization)
+    await verify_supabase_user_async(authorization)
     assert authorization is not None
-    row = get_history_row(job_id, "image", authorization)
+    row = await get_history_row_async(job_id, "image", authorization)
     if row is None:
         raise HTTPException(status_code=404, detail="Image job not found.")
     job = history_row_to_image_job(row)

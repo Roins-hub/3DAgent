@@ -15,8 +15,21 @@ function browserHostname() {
   return typeof window === "undefined" ? undefined : window.location.hostname;
 }
 
+function isDesktopApp() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  return Boolean(
+    window.desktopNavigation?.isDesktopApp ||
+      params.get("__desktop") === "1" ||
+      document.documentElement.classList.contains("desktop-app-shell"),
+  );
+}
+
 function apiBaseUrls() {
-  return apiBaseUrlCandidates(API_BASE_URL, browserHostname());
+  return apiBaseUrlCandidates(API_BASE_URL, browserHostname(), isDesktopApp());
 }
 
 function apiUrl(path: string, baseUrl = activeApiBaseUrl) {

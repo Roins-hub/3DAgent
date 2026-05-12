@@ -13,6 +13,7 @@ export function isLocalHostname(hostname: string | undefined | null): boolean {
 export function apiBaseUrlCandidates(
   primaryBaseUrl: string | undefined | null,
   browserHostname: string | undefined | null,
+  preferDesktopApi = false,
 ): string[] {
   const primary = normalizeApiBaseUrl(primaryBaseUrl);
   const candidates = [primary];
@@ -27,7 +28,11 @@ export function apiBaseUrlCandidates(
       isLocalHostname(primaryUrl.hostname) &&
       primary !== DESKTOP_API_FALLBACK_BASE_URL
     ) {
-      candidates.push(DESKTOP_API_FALLBACK_BASE_URL);
+      if (preferDesktopApi) {
+        candidates.unshift(DESKTOP_API_FALLBACK_BASE_URL);
+      } else {
+        candidates.push(DESKTOP_API_FALLBACK_BASE_URL);
+      }
     }
   } catch {
     // Keep the configured URL as-is if it is not parseable.

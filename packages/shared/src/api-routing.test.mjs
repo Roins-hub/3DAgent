@@ -36,6 +36,13 @@ test("adds desktop fallback only for local browser pages using a local API", () 
   ]);
 });
 
+test("prefers the desktop API when running inside the desktop shell", () => {
+  assert.deepEqual(
+    apiBaseUrlCandidates("http://localhost:8016", "127.0.0.1", true),
+    [DESKTOP_API_FALLBACK_BASE_URL, "http://localhost:8016"],
+  );
+});
+
 test("does not add desktop fallback for deployed pages", () => {
   assert.deepEqual(apiBaseUrlCandidates("https://api.example.com", "admin.example.com"), [
     "https://api.example.com",
