@@ -6,44 +6,18 @@ import {
 
 const imageTypes: InteractiveSelectorOption[] = [
   {
-    title: "家居设计图",
-    description: "室内空间、软装搭配与家居场景方案",
-    href: "/image/workspace?type=home",
-    image:
-      "https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&w=900&q=80",
-    icon: "armchair",
-  },
-  {
-    title: "文具设计图",
-    description: "办公用品、学习工具与文具产品视觉",
-    href: "/image/workspace?type=stationery",
-    image:
-      "https://images.unsplash.com/photo-1455390582262-044cdead277a?auto=format&fit=crop&w=900&q=80",
-    icon: "pen",
-  },
-  {
-    title: "工业模型图",
-    description: "工业产品、设备外观与机械结构概念图",
+    title: "机械零件图",
+    description: "机械结构、精密零件与装配效果图",
     href: "/image/workspace?type=industrial",
-    image:
-      "https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=900&q=80",
+    image: "/gateway-types/image-mechanical-parts.jpeg",
     icon: "factory",
   },
   {
-    title: "文创海报",
-    description: "品牌活动、IP 宣发与文化创意海报",
-    href: "/image/workspace?type=poster",
-    image:
-      "https://images.unsplash.com/photo-1541961017774-22349e4a1262?auto=format&fit=crop&w=900&q=80",
-    icon: "file-image",
-  },
-  {
-    title: "艺术绘画",
-    description: "插画风格、艺术实验与视觉表达探索",
-    href: "/image/workspace?type=painting",
-    image:
-      "https://images.unsplash.com/photo-1513364776144-60967b0f800f?auto=format&fit=crop&w=900&q=80",
-    icon: "palette",
+    title: "白色家电图",
+    description: "洗衣机、冰箱、厨电等白色家电产品图",
+    href: "/image/workspace?type=appliance",
+    image: "/gateway-types/image-white-appliances.jpg",
+    icon: "washing-machine",
   },
 ];
 

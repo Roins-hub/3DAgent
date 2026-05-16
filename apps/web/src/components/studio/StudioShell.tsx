@@ -55,41 +55,24 @@ const exportFormatOptions: Array<{
 ];
 
 const modelTypeCopy = {
-  furniture: {
-    label: "家具模型",
-    hint: "沙发、桌椅、柜体与室内陈设模型",
-    placeholder:
-      "输入你想生成的家具模型，例如一张北欧风实木书桌，带圆角桌面、抽屉和金属桌腿",
-  },
-  stationery: {
-    label: "文具模型",
-    hint: "笔、收纳、桌面工具与学习用品模型",
-    placeholder:
-      "输入你想生成的文具模型，例如一支未来感中性笔，透明笔杆、金属笔夹和防滑握把",
-  },
   industrial: {
-    label: "工业制作模型",
-    hint: "设备外壳、生产夹具与机械结构模型",
+    label: "机械零件生成",
+    hint: "机械结构、工程零件与装配模型",
     placeholder:
-      "输入你想生成的工业制作模型，例如一台紧凑型检测设备外壳，带散热孔、屏幕和按钮面板",
+      "输入你想生成的机械零件，例如一组精密齿轮传动结构，金属材质、倒角边缘、装配孔位清晰",
   },
-  cultural: {
-    label: "文创设计模型",
-    hint: "摆件、礼品、纪念品与品牌衍生模型",
+  appliance: {
+    label: "白色家电生成",
+    hint: "洗衣机、冰箱、厨电等白色家电模型",
     placeholder:
-      "输入你想生成的文创设计模型，例如一款城市地标纪念摆件，含底座、浮雕纹理和礼品展示感",
+      "输入你想生成的白色家电，例如一台极简滚筒洗衣机，白色机身、圆形舱门、细节面板和柔和倒角",
   },
 };
 
 type ModelType = keyof typeof modelTypeCopy;
 
 function getModelType(value: string | null): ModelType {
-  if (
-    value === "furniture" ||
-    value === "stationery" ||
-    value === "industrial" ||
-    value === "cultural"
-  ) {
+  if (value === "industrial" || value === "appliance") {
     return value;
   }
 

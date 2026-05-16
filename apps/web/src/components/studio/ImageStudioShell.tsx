@@ -24,52 +24,28 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 const aspectRatios: ImageAspectRatio[] = ["1:1", "16:9", "9:16", "4:3", "3:4"];
 
 const imageTypeCopy = {
-  home: {
-    label: "家居设计图",
-    hint: "空间方案、家具搭配与室内视觉图",
-    placeholder:
-      "输入家居设计图描述，例如现代客厅空间，浅色沙发、木质茶几、自然光和高级软装",
-  },
-  stationery: {
-    label: "文具设计图",
-    hint: "文具产品外观、包装与桌面展示图",
-    placeholder:
-      "输入文具设计图描述，例如一套极简办公文具，磨砂材质、蓝白配色、整齐摆放在桌面",
-  },
   industrial: {
-    label: "工业模型图",
-    hint: "工业产品、设备外观与模型效果图",
+    label: "机械零件图",
+    hint: "机械结构、精密零件与装配效果图",
     placeholder:
-      "输入工业模型图描述，例如一台智能检测设备的产品渲染图，金属外壳、屏幕、按钮和实验室背景",
+      "输入机械零件图描述，例如一组精密齿轮组件，金属材质、工程灯光、装配结构清晰",
   },
-  poster: {
-    label: "文创海报",
-    hint: "文化创意、城市纪念与品牌活动海报",
+  appliance: {
+    label: "白色家电图",
+    hint: "洗衣机、冰箱、厨电等白色家电产品图",
     placeholder:
-      "输入文创海报描述，例如敦煌纹样主题文创海报，现代排版、暖金色调、丝路视觉元素",
-  },
-  painting: {
-    label: "艺术绘画",
-    hint: "插画、绘画风格与艺术视觉创作",
-    placeholder:
-      "输入艺术绘画描述，例如一幅水彩风格的海边黄昏，柔和色彩、细腻笔触、安静氛围",
+      "输入白色家电图描述，例如一台现代白色冰箱，简洁外观、柔和高光、干净产品摄影背景",
   },
 };
 
 type ImageType = keyof typeof imageTypeCopy;
 
 function getImageType(value: string | null): ImageType {
-  if (
-    value === "home" ||
-    value === "stationery" ||
-    value === "industrial" ||
-    value === "poster" ||
-    value === "painting"
-  ) {
+  if (value === "industrial" || value === "appliance") {
     return value;
   }
 
-  return "home";
+  return "industrial";
 }
 
 function formatTime(value: string) {

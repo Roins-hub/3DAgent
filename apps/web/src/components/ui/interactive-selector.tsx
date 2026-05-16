@@ -3,27 +3,17 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
-  Armchair,
-  Brush,
+  Cog,
   Factory,
-  FileImage,
-  Image as ImageIcon,
   LucideIcon,
-  Palette,
-  PenLine,
-  Sparkles,
+  WashingMachine,
 } from "lucide-react";
 import { AuroraBackground } from "@/components/ui/aurora-background";
 
 type SelectorIcon =
-  | "armchair"
-  | "brush"
+  | "cog"
   | "factory"
-  | "file-image"
-  | "image"
-  | "palette"
-  | "pen"
-  | "sparkles";
+  | "washing-machine";
 
 export interface InteractiveSelectorOption {
   title: string;
@@ -42,44 +32,25 @@ interface InteractiveSelectorProps {
 }
 
 const iconMap: Record<SelectorIcon, LucideIcon> = {
-  armchair: Armchair,
-  brush: Brush,
+  cog: Cog,
   factory: Factory,
-  "file-image": FileImage,
-  image: ImageIcon,
-  palette: Palette,
-  pen: PenLine,
-  sparkles: Sparkles,
+  "washing-machine": WashingMachine,
 };
 
 export const modelSelectorOptions: InteractiveSelectorOption[] = [
   {
     title: "机械零件生成",
-    description: "机械结构、设备外观与工程零件方案",
-    image: "/model-types/industrial.jpg",
+    description: "精密机械结构、工程零件与装配方案",
+    image: "/gateway-types/model-mechanical-parts.jpg",
     href: "/studio?type=industrial",
-    icon: "factory",
+    icon: "cog",
   },
   {
-    title: "家具模型",
-    description: "空间陈设、产品家具与场景道具建模",
-    image: "/model-types/furniture.png",
-    href: "/studio?type=furniture",
-    icon: "armchair",
-  },
-  {
-    title: "文具模型",
-    description: "办公、学习用品与精细小物生成",
-    image: "/model-types/stationery.png",
-    href: "/studio?type=stationery",
-    icon: "pen",
-  },
-  {
-    title: "文创设计模型",
-    description: "IP 周边、展陈装置与创意产品原型",
-    image: "/model-types/cultural.png",
-    href: "/studio?type=cultural",
-    icon: "sparkles",
+    title: "白色家电生成",
+    description: "洗衣机、冰箱、厨电等白色家电外观方案",
+    image: "/gateway-types/model-white-appliances.jpg",
+    href: "/studio?type=appliance",
+    icon: "washing-machine",
   },
 ];
 
@@ -124,6 +95,7 @@ export function InteractiveSelector({
           const isActive = activeIndex === index;
           const isVisible = animatedOptions.has(index);
           const Icon = iconMap[option.icon];
+          const isCompactSet = options.length <= 2;
 
           return (
             <div
@@ -141,7 +113,13 @@ export function InteractiveSelector({
                   ? "0 22px 70px rgba(0,0,0,0.55)"
                   : "0 10px 30px rgba(0,0,0,0.30)",
                 cursor: "pointer",
-                flex: isActive ? "7 1 0%" : "1 1 0%",
+                flex: isCompactSet
+                  ? isActive
+                    ? "1.25 1 0%"
+                    : "1 1 0%"
+                  : isActive
+                    ? "7 1 0%"
+                    : "1 1 0%",
                 opacity: isVisible ? 1 : 0,
                 transform: isVisible ? "translateX(0)" : "translateX(-60px)",
                 zIndex: isActive ? 10 : 1,
