@@ -8,6 +8,7 @@ import {
   Braces,
   Clipboard,
   Download,
+  FileDown,
   FileCode2,
   Loader2,
   Maximize2,
@@ -36,6 +37,7 @@ type CadSpec = {
 };
 
 type CompileStatus = "idle" | "compiling" | "ready" | "stale" | "failed";
+type CadamMode = "openscad" | "paramcad";
 
 type OpenSCADInstance = {
   renderToStl(code: string): Promise<string>;
@@ -367,10 +369,13 @@ function EmptyPreview({ status }: { status: CompileStatus }) {
 }
 
 export function CADAMWorkbench() {
+  const [mode, setMode] = React.useState<CadamMode>("openscad");
   const [prompt, setPrompt] = React.useState(examples[0]);
   const [spec, setSpec] = React.useState<CadSpec>(initialSpec);
   const [code, setCode] = React.useState(() => scadForSpec(initialSpec));
   const [stl, setStl] = React.useState<string | null>(null);
+  const [paramcadResult, setParamcadResult] = React.useState<Awaited<ReturnType<typeof api.paramcadRun>> | null>(null);
+  const [runFea, setRunFea] = React.useState(true);
   const [generatorMeta, setGeneratorMeta] = React.useState("OpenAI-compatible");
   const [error, setError] = React.useState<string | null>(null);
   const [compileNote, setCompileNote] = React.useState<string | null>(null);
@@ -414,8 +419,18 @@ export function CADAMWorkbench() {
     setError(null);
     setCompileNote(null);
     setCompileStatus("compiling");
+    setParamcadResult(null);
 
     try {
+      if (mode === "paramcad") {
+        const result = await api.paramcadRun({ requirement: prompt, runFea });
+        setParamcadResult(result);
+        setGeneratorMeta(`${result.provider} · ${result.model}`);
+        setCompileStatus("ready");
+        setCompileNote("工程 CAD 流水线已完成，可查看优化参数、FEA 指标并下载 STEP 文件。");
+        return;
+      }
+
       const result = await api.cadamGenerate({
         prompt,
         parameters: spec,
@@ -466,6 +481,16 @@ export function CADAMWorkbench() {
         setCompileNote(null);
       }
     } catch (generateError) {
+      if (mode === "paramcad") {
+        setCompileStatus("failed");
+        setStl(null);
+        setGeneratorMeta("AI-ParamCAD");
+        const message = generateError instanceof Error ? generateError.message : "AI-ParamCAD 引擎调用失败。";
+        setError(message);
+        setCompileNote("AI-ParamCAD 引擎未连接或没有正常响应。请先启动 engines/AI-ParamCAD 服务，再运行工程 CAD。工程 CAD 模式不会回退到 OpenSCAD 本地预览。");
+        return;
+      }
+
       const fallbackSpec = inferSpec(prompt, spec);
       const stableScad = scadForSpec(fallbackSpec);
       setSpec(fallbackSpec);
@@ -498,6 +523,7 @@ export function CADAMWorkbench() {
     setSpec(initialSpec);
     setCode(scadForSpec(initialSpec));
     setStl(null);
+    setParamcadResult(null);
     setGeneratorMeta("OpenAI-compatible");
     setCompileStatus("idle");
     setError(null);
@@ -568,11 +594,13 @@ export function CADAMWorkbench() {
       <div className="cadam-workbench-top">
         <div>
           <p>CADAM AI 生成 CAD</p>
-          <span>Text-to-CAD、OpenSCAD WASM 编译、真实网格预览与 STL 导出</span>
+          <span>文本生成 CAD、OpenSCAD 预览、STL 导出与工程 STEP 输出</span>
         </div>
-        <div className="cadam-status">
-          {compileStatus === "compiling" ? <Loader2 size={15} /> : <Sparkles size={15} />}
-          <span>{compileStatus === "ready" ? "真实 STL 网格" : "OpenSCAD WASM"}</span>
+        <div className="cadam-toolbar">
+          <div className="cadam-status">
+            {compileStatus === "compiling" ? <Loader2 size={15} /> : <Sparkles size={15} />}
+            <span>{mode === "paramcad" ? "AI-ParamCAD" : compileStatus === "ready" ? "STL 就绪" : "OpenSCAD WASM"}</span>
+          </div>
         </div>
       </div>
 
@@ -586,9 +614,27 @@ export function CADAMWorkbench() {
             </div>
           </div>
 
+          <div className="cadam-mode-tabs" role="tablist" aria-label="CAD mode">
+            <button className={mode === "openscad" ? "active" : ""} type="button" onClick={() => setMode("openscad")}>
+              <FileCode2 size={15} />
+              <span>OpenSCAD</span>
+            </button>
+            <button className={mode === "paramcad" ? "active" : ""} type="button" onClick={() => setMode("paramcad")}>
+              <FileDown size={15} />
+              <span>工程 CAD</span>
+            </button>
+          </div>
+
           <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} />
 
-          <div className="cadam-params">
+          {mode === "paramcad" ? (
+            <label className="cadam-fea-toggle">
+              <input type="checkbox" checked={runFea} onChange={(event) => setRunFea(event.target.checked)} />
+              <span>运行 FEA 校核</span>
+            </label>
+          ) : null}
+
+          {mode === "openscad" ? <div className="cadam-params">
             {[
               ["宽度", "width", 40, 180],
               ["高度", "height", 30, 160],
@@ -611,12 +657,12 @@ export function CADAMWorkbench() {
                 />
               </label>
             ))}
-          </div>
+          </div> : null}
 
           <div className="cadam-action-row">
             <button className="cadam-primary-action" type="button" onClick={generate} disabled={isGenerating}>
               {isGenerating ? <Loader2 size={17} /> : <Play size={17} />}
-              生成并编译
+              {mode === "paramcad" ? "运行工程 CAD" : "生成并编译"}
             </button>
             <button className="cadam-ghost-action" type="button" onClick={reset}>
               <RotateCcw size={16} />
@@ -638,50 +684,92 @@ export function CADAMWorkbench() {
             </div>
           ) : null}
 
-          <div className="cadam-panel cadam-code-panel">
-            <div className="cadam-code-header">
-              <div>
-                <FileCode2 size={18} />
-                <span>OpenSCAD 输出</span>
+          {mode === "paramcad" ? (
+            <div className="cadam-panel paramcad-result-panel">
+              <div className="cadam-code-header">
+                <div>
+                  <FileDown size={18} />
+                  <span>AI-ParamCAD 工程结果</span>
+                </div>
+                {paramcadResult?.stepFile ? (
+                  <a href={api.paramcadOutputUrl(paramcadResult.stepFile)} download>
+                    <Download size={15} />
+                    STEP
+                  </a>
+                ) : null}
               </div>
-              <div>
-                <button type="button" onClick={() => navigator.clipboard.writeText(code)}>
-                  <Clipboard size={15} />
-                  复制
-                </button>
-                <button type="button" onClick={compilePreview} disabled={compileStatus === "compiling"}>
-                  {compileStatus === "compiling" ? <Loader2 size={15} /> : <Box size={15} />}
-                  编译预览
-                </button>
-                <button type="button" onClick={downloadScad}>
-                  <Download size={15} />
-                  SCAD
-                </button>
-                <button type="button" onClick={downloadStl} disabled={compileStatus === "compiling"}>
-                  <Download size={15} />
-                  STL
-                </button>
-              </div>
+              {paramcadResult ? (
+                <div className="paramcad-result-grid">
+                  <div><span>标题</span><strong>{paramcadResult.title ?? "-"}</strong></div>
+                  <div><span>材料</span><strong>{paramcadResult.material ?? "-"}</strong></div>
+                  <div><span>几何类型</span><strong>{paramcadResult.geometryType ?? "-"}</strong></div>
+                  <div><span>优化分数</span><strong>{paramcadResult.score?.toFixed(1) ?? "-"}</strong></div>
+                  <div><span>迭代次数</span><strong>{paramcadResult.iterations ?? "-"}</strong></div>
+                  <div><span>安全系数</span><strong>{paramcadResult.safetyFactor?.toFixed(2) ?? "-"}</strong></div>
+                  <div><span>最大应力</span><strong>{paramcadResult.maxStress?.toFixed(1) ?? "-"} MPa</strong></div>
+                  <div><span>FEA</span><strong>{paramcadResult.feaPassed == null ? "-" : paramcadResult.feaPassed ? "通过" : "未通过"}</strong></div>
+                </div>
+              ) : (
+                <div className="paramcad-empty">运行工程 CAD 流水线后，这里会显示优化参数、FEA 指标和 STEP 下载。</div>
+              )}
+              {paramcadResult && Object.keys(paramcadResult.parameters).length > 0 ? (
+                <div className="paramcad-parameters">
+                  {Object.entries(paramcadResult.parameters).map(([key, value]) => (
+                    <span key={key}>{key}: {Number(value).toFixed(2)}</span>
+                  ))}
+                </div>
+              ) : null}
             </div>
-            <textarea
-              className="cadam-code-editor"
-              value={code}
-              onChange={(event) => {
-                setCode(event.target.value);
-                setCompileStatus("stale");
-              }}
-              spellCheck={false}
-            />
-          </div>
+          ) : (
+            <div className="cadam-panel cadam-code-panel">
+              <div className="cadam-code-header">
+                <div>
+                  <FileCode2 size={18} />
+                  <span>OpenSCAD 输出</span>
+                </div>
+                <div>
+                  <button type="button" onClick={() => navigator.clipboard.writeText(code)}>
+                    <Clipboard size={15} />
+                    复制
+                  </button>
+                  <button type="button" onClick={compilePreview} disabled={compileStatus === "compiling"}>
+                    {compileStatus === "compiling" ? <Loader2 size={15} /> : <Box size={15} />}
+                    编译预览
+                  </button>
+                  <button type="button" onClick={downloadScad}>
+                    <Download size={15} />
+                    SCAD
+                  </button>
+                  <button type="button" onClick={downloadStl} disabled={compileStatus === "compiling"}>
+                    <Download size={15} />
+                    STL
+                  </button>
+                </div>
+              </div>
+              <textarea
+                className="cadam-code-editor"
+                value={code}
+                onChange={(event) => {
+                  setCode(event.target.value);
+                  setCompileStatus("stale");
+                }}
+                spellCheck={false}
+              />
+            </div>
+          )}
         </aside>
 
         <section className="cadam-preview-column">
           <div className="cadam-panel cadam-preview-panel">
             <div className="cadam-preview-header">
               <div>
-                <p>{spec.name}</p>
+                <p>{mode === "paramcad" ? (paramcadResult?.title ?? "AI-ParamCAD") : spec.name}</p>
                 <span>
-                  {spec.width} x {spec.height} x {spec.depth} mm · {generatorMeta}
+                  {mode === "paramcad"
+                    ? paramcadResult
+                      ? `${paramcadResult.material ?? "材料"} / ${paramcadResult.geometryType ?? "几何"} / ${generatorMeta}`
+                      : "等待运行工程 CAD 流水线"
+                    : `${spec.width} x ${spec.height} x ${spec.depth} mm / ${generatorMeta}`}
                 </span>
               </div>
               <button
@@ -694,7 +782,13 @@ export function CADAMWorkbench() {
               </button>
             </div>
             <div className="cadam-canvas-shell">
-              {previewScene()}
+              {mode === "paramcad" ? (
+                <div className="paramcad-preview-summary">
+                  <FileDown size={34} />
+                  <strong>{paramcadResult?.title ?? "AI-ParamCAD 工程结果"}</strong>
+                  <span>{paramcadResult?.stepFile ? "STEP 文件已生成，可下载到 CAD 软件继续编辑。" : "运行后会返回优化参数、FEA 指标和 STEP 文件。"}</span>
+                </div>
+              ) : previewScene()}
             </div>
           </div>
         </section>

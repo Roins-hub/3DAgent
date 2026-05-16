@@ -41,6 +41,7 @@ const editableSettings = [
   { key: "MODEL_PROVIDER", label: "三维供应商", secret: false, placeholder: "mock / hunyuan / meshy / neural4d" },
   { key: "IMAGE_PROVIDER", label: "图片供应商", secret: false, placeholder: "mock / siliconflow / openai" },
   { key: "CADAM_LLM_PROVIDER", label: "CADAM 模型通道", secret: false, placeholder: "mimo / openai" },
+  { key: "AI_PARAMCAD_BASE_URL", label: "AI-ParamCAD 引擎地址", secret: false, placeholder: "http://localhost:8088" },
   { key: "OPENAI_IMAGE_MODEL", label: "OpenAI 图片模型", secret: false, placeholder: "gpt-image-2" },
   { key: "SILICONFLOW_IMAGE_MODEL", label: "SiliconFlow 图片模型", secret: false, placeholder: "Kwai-Kolors/Kolors" },
   { key: "MIMO_CHAT_MODEL", label: "MIMO 对话模型", secret: false, placeholder: "mimo-v2.5-pro" },
@@ -77,6 +78,7 @@ function jobKindLabel(kind: AdminGenerationJob["kind"]) {
     "3d": "3D",
     image: "图片",
     cadam: "CADAM",
+    paramcad: "工程 CAD",
   };
   return labels[kind] ?? kind;
 }
@@ -290,6 +292,7 @@ export function AdminConsole() {
             <div className="admin-metrics">
               <Metric label="用户总数" value={summary?.totalUsers ?? 0} />
               <Metric label="生成总数" value={summary?.totalJobs ?? 0} />
+              <Metric label="工程 CAD" value={summary?.paramcadJobs ?? 0} />
               <Metric label="运行中" value={summary?.runningJobs ?? 0} />
               <Metric label="失败任务" value={summary?.failedJobs ?? 0} tone="danger" />
             </div>
@@ -337,7 +340,7 @@ export function AdminConsole() {
           <Panel title="生成记录">
             <div className="admin-filters">
               <label><Search size={15} /><input value={jobSearch} onChange={(event) => setJobSearch(event.target.value)} placeholder="搜索提示词" /></label>
-              <select value={jobKind} onChange={(event) => setJobKind(event.target.value)}><option value="">全部类型</option><option value="3d">3D</option><option value="image">图片</option><option value="cadam">CADAM</option></select>
+              <select value={jobKind} onChange={(event) => setJobKind(event.target.value)}><option value="">全部类型</option><option value="3d">3D</option><option value="image">图片</option><option value="cadam">CADAM</option><option value="paramcad">工程 CAD</option></select>
               <select value={jobStatus} onChange={(event) => setJobStatus(event.target.value)}><option value="">全部状态</option><option value="queued">排队</option><option value="running">运行</option><option value="completed">完成</option><option value="failed">失败</option></select>
               <label className="admin-checkbox"><input checked={includeDeleted} onChange={(event) => setIncludeDeleted(event.target.checked)} type="checkbox" />含软删</label>
               <button onClick={() => void loadJobs()} type="button">筛选</button>

@@ -66,6 +66,7 @@ ADMIN_VISIBLE_SETTING_KEYS = [
     "MODEL_PROVIDER",
     "IMAGE_PROVIDER",
     "CADAM_LLM_PROVIDER",
+    "AI_PARAMCAD_BASE_URL",
     "OPENAI_IMAGE_MODEL",
     "SILICONFLOW_IMAGE_MODEL",
     "MIMO_CHAT_MODEL",
@@ -163,6 +164,7 @@ class AdminSummary(BaseModel):
     modelJobs: int
     imageJobs: int
     cadamJobs: int = 0
+    paramcadJobs: int = 0
     failedJobs: int
     runningJobs: int
     completedJobs: int
@@ -251,6 +253,30 @@ class CadamGenerateResponse(BaseModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
     provider: str
     model: str
+
+
+class ParamcadRunRequest(BaseModel):
+    requirement: str = Field(min_length=1, max_length=2400)
+    runFea: bool = False
+
+
+class ParamcadRunResponse(BaseModel):
+    success: bool
+    message: str | None = None
+    title: str | None = None
+    domain: str | None = None
+    material: str | None = None
+    geometryType: str | None = None
+    score: float | None = None
+    iterations: int | None = None
+    safetyFactor: float | None = None
+    maxStress: float | None = None
+    feaPassed: bool | None = None
+    stepFile: str | None = None
+    stepDownloadUrl: str | None = None
+    parameters: dict[str, float] = Field(default_factory=dict)
+    provider: str = "ai-paramcad"
+    model: str = "java-paramcad-engine"
 
 
 @dataclass(frozen=True)
@@ -502,6 +528,19 @@ def cadam_mimo_max_completion_tokens() -> int:
 
 def cadam_llm_provider() -> str:
     return runtime_setting_value("CADAM_LLM_PROVIDER", "cascade").strip().lower() or "cascade"
+
+
+def paramcad_base_url() -> str:
+    return runtime_setting_value("AI_PARAMCAD_BASE_URL", "http://localhost:8088").strip().rstrip("/")
+
+
+def paramcad_timeout_seconds() -> int:
+    raw_value = runtime_setting_value("AI_PARAMCAD_TIMEOUT_SECONDS", "180").strip()
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return 180
+    return max(30, min(value, 600))
 
 
 def cadam_deepseek_base_url() -> str:
@@ -1113,6 +1152,59 @@ def generate_cadam_response(request: CadamGenerateRequest) -> CadamGenerateRespo
         return ensure_cadam_response_matches_prompt(request, result)
 
     raise HTTPException(status_code=400, detail="CADAM_LLM_PROVIDER must be cascade, deepseek, mimo, or openai.")
+
+
+def proxied_paramcad_download_url(step_file: str | None) -> str | None:
+    if not step_file:
+        return None
+    return f"/api/paramcad/outputs/{quote(Path(step_file).name)}"
+
+
+def run_paramcad_engine(request: ParamcadRunRequest) -> ParamcadRunResponse:
+    base_url = paramcad_base_url()
+    if not base_url:
+        raise HTTPException(status_code=503, detail="AI-ParamCAD base URL is not configured.")
+
+    try:
+        response = requests.post(
+            f"{base_url}/api/run",
+            json={"requirement": request.requirement.strip(), "runFea": request.runFea},
+            timeout=paramcad_timeout_seconds(),
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"AI-ParamCAD service is unavailable: {exc}",
+        ) from exc
+
+    if response.status_code >= 400:
+        body = response.text[:800]
+        raise HTTPException(status_code=502, detail=f"AI-ParamCAD request failed: HTTP {response.status_code} {body}")
+
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=502, detail="AI-ParamCAD returned an invalid response.")
+
+    step_file = payload.get("stepFile") if isinstance(payload.get("stepFile"), str) else None
+    result = ParamcadRunResponse(
+        success=bool(payload.get("success")),
+        message=str(payload.get("message")) if payload.get("message") is not None else None,
+        title=str(payload.get("title")) if payload.get("title") is not None else None,
+        domain=str(payload.get("domain")) if payload.get("domain") is not None else None,
+        material=str(payload.get("material")) if payload.get("material") is not None else None,
+        geometryType=str(payload.get("geometryType")) if payload.get("geometryType") is not None else None,
+        score=float(payload["score"]) if isinstance(payload.get("score"), (int, float)) else None,
+        iterations=int(payload["iterations"]) if isinstance(payload.get("iterations"), (int, float)) else None,
+        safetyFactor=float(payload["safetyFactor"]) if isinstance(payload.get("safetyFactor"), (int, float)) else None,
+        maxStress=float(payload["maxStress"]) if isinstance(payload.get("maxStress"), (int, float)) else None,
+        feaPassed=bool(payload["feaPassed"]) if isinstance(payload.get("feaPassed"), bool) else None,
+        stepFile=step_file,
+        stepDownloadUrl=proxied_paramcad_download_url(step_file),
+        parameters=payload.get("parameters") if isinstance(payload.get("parameters"), dict) else {},
+    )
+    if not result.success:
+        raise HTTPException(status_code=502, detail=result.message or "AI-ParamCAD pipeline failed.")
+    return result
 
 
 def repair_main_module_defaults(scad: str, parameters: dict[str, Any]) -> str:
@@ -1732,6 +1824,85 @@ def try_insert_cadam_history_row(row: dict[str, Any], authorization: str) -> Non
         print(f"Supabase CADAM history insert skipped for job {row.get('id')}: {exc}")
 
 
+def paramcad_response_to_history_row(
+    job_id: str,
+    request: ParamcadRunRequest,
+    response: ParamcadRunResponse,
+    user_id: str,
+    timestamp: str,
+) -> dict[str, Any]:
+    return {
+        "id": job_id,
+        "user_id": user_id,
+        "kind": "paramcad",
+        "prompt": request.requirement.strip(),
+        "mode": "engineering-cad",
+        "status": "completed" if response.success else "failed",
+        "progress": 100 if response.success else 0,
+        "quality": None,
+        "style": None,
+        "target_format": "step",
+        "aspect_ratio": None,
+        "result_url": response.stepDownloadUrl,
+        "thumbnail_url": None,
+        "error": None if response.success else response.message,
+        "metadata": {
+            "title": response.title,
+            "domain": response.domain,
+            "material": response.material,
+            "geometryType": response.geometryType,
+            "parameters": response.parameters,
+            "score": response.score,
+            "iterations": response.iterations,
+            "safetyFactor": response.safetyFactor,
+            "maxStress": response.maxStress,
+            "feaPassed": response.feaPassed,
+            "stepFile": response.stepFile,
+            "stepDownloadUrl": response.stepDownloadUrl,
+            "provider": response.provider,
+            "model": response.model,
+            "runFea": request.runFea,
+        },
+        "created_at": timestamp,
+        "updated_at": timestamp,
+    }
+
+
+def failed_paramcad_history_row(
+    job_id: str,
+    request: ParamcadRunRequest,
+    user_id: str,
+    timestamp: str,
+    error: str,
+) -> dict[str, Any]:
+    return {
+        "id": job_id,
+        "user_id": user_id,
+        "kind": "paramcad",
+        "prompt": request.requirement.strip(),
+        "mode": "engineering-cad",
+        "status": "failed",
+        "progress": 0,
+        "quality": None,
+        "style": None,
+        "target_format": "step",
+        "aspect_ratio": None,
+        "result_url": None,
+        "thumbnail_url": None,
+        "error": error,
+        "metadata": {"runFea": request.runFea, "provider": "ai-paramcad"},
+        "created_at": timestamp,
+        "updated_at": timestamp,
+    }
+
+
+def try_insert_paramcad_history_row(row: dict[str, Any], authorization: str) -> None:
+    try:
+        insert_history_row(row, authorization)
+    except Exception as exc:
+        print(f"Supabase ParamCAD history insert skipped for job {row.get('id')}: {exc}")
+
+
 def history_row_to_generation_job(row: dict[str, Any]) -> GenerationJob:
     metadata = row.get("metadata")
     return GenerationJob(
@@ -1855,7 +2026,7 @@ def admin_list_generation_rows(
     limit: int = 100,
 ) -> list[dict[str, Any]]:
     filters = ["select=*", "order=created_at.desc", f"limit={max(1, min(limit, 500))}"]
-    if kind and kind in {"3d", "image", "cadam"}:
+    if kind and kind in {"3d", "image", "cadam", "paramcad"}:
         filters.append(f"kind=eq.{kind}")
     if status:
         filters.append(f"status=eq.{quote(status)}")
@@ -3116,6 +3287,7 @@ async def admin_summary(authorization: str | None = Header(default=None)) -> Adm
         modelJobs=sum(1 for row in rows if row.get("kind") == "3d"),
         imageJobs=sum(1 for row in rows if row.get("kind") == "image"),
         cadamJobs=sum(1 for row in rows if row.get("kind") == "cadam"),
+        paramcadJobs=sum(1 for row in rows if row.get("kind") == "paramcad"),
         failedJobs=failed_jobs,
         runningJobs=running_jobs,
         completedJobs=completed_jobs,
@@ -3248,6 +3420,25 @@ def retry_admin_generation(row: dict[str, Any], admin: AuthUser) -> dict[str, An
             }
         except HTTPException as exc:
             retry_row = failed_cadam_history_row(new_id, request, str(row.get("user_id") or ""), timestamp, str(exc.detail))
+            retry_row["metadata"] = {
+                **(retry_row.get("metadata") if isinstance(retry_row.get("metadata"), dict) else {}),
+                "retried_from": row.get("id"),
+            }
+    elif row.get("kind") == "paramcad":
+        metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        request = ParamcadRunRequest(
+            requirement=str(row.get("prompt") or ""),
+            runFea=bool(metadata.get("runFea", False)),
+        )
+        try:
+            result = run_paramcad_engine(request)
+            retry_row = paramcad_response_to_history_row(new_id, request, result, str(row.get("user_id") or ""), timestamp)
+            retry_row["metadata"] = {
+                **(retry_row.get("metadata") if isinstance(retry_row.get("metadata"), dict) else {}),
+                "retried_from": row.get("id"),
+            }
+        except HTTPException as exc:
+            retry_row = failed_paramcad_history_row(new_id, request, str(row.get("user_id") or ""), timestamp, str(exc.detail))
             retry_row["metadata"] = {
                 **(retry_row.get("metadata") if isinstance(retry_row.get("metadata"), dict) else {}),
                 "retried_from": row.get("id"),
@@ -3462,6 +3653,64 @@ async def cadam_generate(
             auth_header,
         )
     return result
+
+
+@app.post("/api/paramcad/run", response_model=ParamcadRunResponse)
+async def paramcad_run(
+    request: ParamcadRunRequest,
+    authorization: str | None = Header(default=None),
+) -> ParamcadRunResponse:
+    if not request.requirement.strip():
+        raise HTTPException(status_code=400, detail="Requirement is required.")
+
+    auth_header = authorization if isinstance(authorization, str) and authorization.strip() else None
+    user = verify_supabase_user(auth_header) if auth_header else None
+    job_id = str(uuid4())
+    timestamp = now_iso()
+    try:
+        result = await asyncio.to_thread(run_paramcad_engine, request)
+    except HTTPException as exc:
+        if user and auth_header:
+            try_insert_paramcad_history_row(
+                failed_paramcad_history_row(job_id, request, user.id, timestamp, str(exc.detail)),
+                auth_header,
+            )
+        raise
+
+    if user and auth_header:
+        try_insert_paramcad_history_row(
+            paramcad_response_to_history_row(job_id, request, result, user.id, timestamp),
+            auth_header,
+        )
+    return result
+
+
+@app.get("/api/paramcad/outputs/{step_file}")
+async def paramcad_output_file(step_file: str):
+    safe_file = Path(step_file).name
+    if not safe_file:
+        raise HTTPException(status_code=404, detail="File not found.")
+
+    base_url = paramcad_base_url()
+    try:
+        response = requests.get(
+            f"{base_url}/outputs/{quote(safe_file)}",
+            timeout=paramcad_timeout_seconds(),
+            stream=True,
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=503, detail=f"AI-ParamCAD service is unavailable: {exc}") from exc
+
+    if response.status_code == 404:
+        raise HTTPException(status_code=404, detail="File not found.")
+    if response.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"AI-ParamCAD download failed: HTTP {response.status_code}")
+
+    return StreamingResponse(
+        response.iter_content(chunk_size=64 * 1024),
+        media_type=response.headers.get("content-type", "application/step"),
+        headers={"Content-Disposition": f'attachment; filename="{safe_file}"'},
+    )
 
 
 @app.post("/api/jobs", response_model=GenerationJob)

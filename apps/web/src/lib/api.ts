@@ -38,7 +38,7 @@ function apiUrl(path: string, baseUrl = activeApiBaseUrl) {
 
 function connectionErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : "";
-  return `Cannot connect to backend ${apiBaseUrls().join(" or ")}. Please confirm FastAPI is running.${message ? ` (${message})` : ""}`;
+  return `无法连接后端服务 ${apiBaseUrls().join(" 或 ")}。请确认 FastAPI 已启动。${message ? `（${message}）` : ""}`;
 }
 
 function formatApiError(status: number, detail: unknown) {
@@ -88,6 +88,7 @@ export interface AdminSummary {
   modelJobs: number;
   imageJobs: number;
   cadamJobs: number;
+  paramcadJobs: number;
   failedJobs: number;
   runningJobs: number;
   completedJobs: number;
@@ -106,7 +107,7 @@ export interface AdminUser {
 export interface AdminGenerationJob {
   id: string;
   userId: string;
-  kind: "3d" | "image" | "cadam";
+  kind: "3d" | "image" | "cadam" | "paramcad";
   prompt: string;
   mode: string | null;
   status: JobStatus;
@@ -154,6 +155,30 @@ export interface CadamGenerateResponse {
   description: string;
   scad: string;
   parameters: Record<string, unknown>;
+  provider: string;
+  model: string;
+}
+
+export interface ParamcadRunRequest {
+  requirement: string;
+  runFea?: boolean;
+}
+
+export interface ParamcadRunResponse {
+  success: boolean;
+  message: string | null;
+  title: string | null;
+  domain: string | null;
+  material: string | null;
+  geometryType: string | null;
+  score: number | null;
+  iterations: number | null;
+  safetyFactor: number | null;
+  maxStress: number | null;
+  feaPassed: boolean | null;
+  stepFile: string | null;
+  stepDownloadUrl: string | null;
+  parameters: Record<string, number>;
   provider: string;
   model: string;
 }
@@ -227,6 +252,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  paramcadRun: (payload: ParamcadRunRequest) =>
+    request<ParamcadRunResponse>("/api/paramcad/run", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  paramcadOutputUrl: (stepFile: string) =>
+    `${activeApiBaseUrl}/api/paramcad/outputs/${encodeURIComponent(stepFile)}`,
   adminSummary: () => request<AdminSummary>("/api/admin/summary"),
   adminUsers: () => request<{ users: AdminUser[] }>("/api/admin/users"),
   adminUserAction: (userId: string, action: "disable" | "restore") =>

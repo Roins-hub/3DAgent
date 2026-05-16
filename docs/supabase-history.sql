@@ -4,7 +4,7 @@
 create table if not exists public.generation_jobs (
   id uuid primary key,
   user_id uuid not null references auth.users(id) on delete cascade,
-  kind text not null check (kind in ('3d', 'image', 'cadam')),
+  kind text not null check (kind in ('3d', 'image', 'cadam', 'paramcad')),
   prompt text not null,
   mode text,
   status text not null check (status in ('queued', 'running', 'postprocessing', 'completed', 'failed')),
@@ -55,7 +55,7 @@ begin
 
   alter table public.generation_jobs
     add constraint generation_jobs_kind_check
-    check (kind in ('3d', 'image', 'cadam'));
+    check (kind in ('3d', 'image', 'cadam', 'paramcad'));
 end $$;
 
 create table if not exists public.admin_settings (
