@@ -1,12 +1,13 @@
 "use client";
 
 import type { GenerationJob } from "@3dagent/shared";
-import { ContactShadows, Grid, OrbitControls, useGLTF } from "@react-three/drei";
+import { Center, ContactShadows, Grid, OrbitControls, useGLTF } from "@react-three/drei";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Loader2, RotateCcw, ZoomIn } from "lucide-react";
 import { Component, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ErrorInfo, ReactNode } from "react";
-import type { Group, Mesh } from "three";
+import { Box3, Vector3 } from "three";
+import type { Group, Mesh, Object3D } from "three";
 import { getAuthHeaders } from "@/lib/supabase";
 
 class ModelErrorBoundary extends Component<
@@ -34,26 +35,58 @@ class ModelErrorBoundary extends Component<
   }
 }
 
-function ModelAsset({ url, onLoaded }: { url: string; onLoaded: () => void }) {
+function getModelScale(scene: Object3D) {
+  let meshCount = 0;
+  scene.traverse((child) => {
+    if ((child as Mesh).isMesh) {
+      meshCount += 1;
+    }
+  });
+
+  const box = new Box3().setFromObject(scene);
+  if (meshCount === 0 || box.isEmpty()) {
+    return null;
+  }
+
+  const size = box.getSize(new Vector3());
+  const maxAxis = Math.max(size.x, size.y, size.z, 1);
+  return 2.8 / maxAxis;
+}
+
+function ModelAsset({
+  url,
+  onLoaded,
+  onError,
+}: {
+  url: string;
+  onLoaded: () => void;
+  onError: (message: string) => void;
+}) {
   const group = useRef<Group>(null);
   const gltf = useGLTF(url);
+  const modelScale = useMemo(() => getModelScale(gltf.scene), [gltf.scene]);
 
   useEffect(() => {
+    if (!modelScale) {
+      onError("模型文件没有可显示的网格。");
+      return;
+    }
     onLoaded();
-  }, [onLoaded]);
+  }, [modelScale, onError, onLoaded]);
 
   useFrame((_, delta) => {
     if (!group.current) return;
     group.current.rotation.y += delta * 0.22;
   });
 
+  if (!modelScale) {
+    return null;
+  }
+
   return (
-    <primitive
-      ref={group}
-      object={gltf.scene}
-      position={[0, 0.25, 0]}
-      scale={1.35}
-    />
+    <Center ref={group}>
+      <primitive object={gltf.scene} scale={modelScale} />
+    </Center>
   );
 }
 
@@ -95,7 +128,6 @@ function AuthenticatedModelAsset({
         console.info("模型文件下载完成", Math.round(performance.now() - startedAt), "ms");
         nextObjectUrl = window.URL.createObjectURL(blob);
         setAssetState({ sourceUrl: url, objectUrl: nextObjectUrl });
-        onLoaded();
       } catch (error) {
         if (controller.signal.aborted) {
           return;
@@ -112,13 +144,13 @@ function AuthenticatedModelAsset({
         window.URL.revokeObjectURL(nextObjectUrl);
       }
     };
-  }, [onError, onLoaded, url]);
+  }, [onError, url]);
 
   if (assetState?.sourceUrl !== url || !assetState.objectUrl) {
     return <PreviewAsset activeJob={activeJob} mode="loading" />;
   }
 
-  return <ModelAsset url={assetState.objectUrl} onLoaded={onLoaded} />;
+  return <ModelAsset url={assetState.objectUrl} onLoaded={onLoaded} onError={onError} />;
 }
 
 function PreviewAsset({
@@ -221,12 +253,11 @@ export function GenerationCanvas({
   } | null>(null);
   const currentModelError =
     modelError && modelError.sourceUrl === modelUrl ? modelError.message : null;
-  const isRealModel =
+  const hasPreviewModel =
     activeJob?.status === "completed" &&
-    Boolean(modelUrl) &&
-    modelUrl !== "/models/demo-asset.glb";
+    Boolean(modelUrl);
   const isModelLoading = Boolean(
-    isRealModel && loadedModelUrl !== modelUrl && !currentModelError,
+    hasPreviewModel && loadedModelUrl !== modelUrl && !currentModelError,
   );
   const overlayCopy = useMemo(
     () => getOverlayCopy(activeJob, isModelLoading, currentModelError),
@@ -238,7 +269,7 @@ export function GenerationCanvas({
 
   return (
     <div className="studio-preview-canvas">
-      {(currentModelError || isModelLoading || !isRealModel) && (
+      {(currentModelError || isModelLoading || !hasPreviewModel) && (
         <div className="studio-preview-overlay">
           <div className="studio-preview-loader">
             {isModelLoading ? <Loader2 className="animate-spin" size={26} /> : null}

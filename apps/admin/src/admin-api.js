@@ -1,12 +1,13 @@
 import { supabase } from "./supabase";
 import { apiBaseUrlCandidates, normalizeApiBaseUrl } from "@3dagent/shared";
 export const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL || import.meta.env.NEXT_PUBLIC_API_BASE_URL);
+const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.NEXT_PUBLIC_API_BASE_URL;
 let activeApiBaseUrl = API_BASE_URL;
 function browserHostname() {
     return typeof window === "undefined" ? undefined : window.location.hostname;
 }
 function apiBaseUrls() {
-    return apiBaseUrlCandidates(API_BASE_URL, browserHostname());
+    return apiBaseUrlCandidates(configuredApiBaseUrl, browserHostname());
 }
 function apiUrl(path, baseUrl = activeApiBaseUrl) {
     return `${baseUrl}${path}`;

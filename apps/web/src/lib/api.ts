@@ -9,6 +9,7 @@ import { apiBaseUrlCandidates, normalizeApiBaseUrl } from "@3dagent/shared";
 import { getAuthHeaders } from "@/lib/supabase";
 
 export const API_BASE_URL = normalizeApiBaseUrl(process.env.NEXT_PUBLIC_API_BASE_URL);
+const configuredApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
 let activeApiBaseUrl = API_BASE_URL;
 
 export function createClientRequestId() {
@@ -36,7 +37,7 @@ function isDesktopApp() {
 }
 
 function apiBaseUrls() {
-  return apiBaseUrlCandidates(API_BASE_URL, browserHostname(), isDesktopApp());
+  return apiBaseUrlCandidates(configuredApiBaseUrl, browserHostname(), isDesktopApp());
 }
 
 function apiUrl(path: string, baseUrl = activeApiBaseUrl) {

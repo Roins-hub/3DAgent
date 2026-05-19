@@ -559,7 +559,7 @@ def selected_provider() -> str:
 
 
 def selected_image_provider() -> str:
-    return runtime_setting_value("IMAGE_PROVIDER", "siliconflow").strip().lower()
+    return runtime_setting_value("IMAGE_PROVIDER", "openai").strip().lower() or "openai"
 
 
 def mimo_base_url() -> str:
@@ -3767,7 +3767,7 @@ async def health() -> dict[str, str]:
         "status": "ok",
         "service": "3d-agent-api",
         "provider": env_setting_value("MODEL_PROVIDER", "mock").strip().lower(),
-        "imageProvider": env_setting_value("IMAGE_PROVIDER", "siliconflow").strip().lower(),
+        "imageProvider": env_setting_value("IMAGE_PROVIDER", "openai").strip().lower() or "openai",
         "cadamProvider": env_setting_value("CADAM_LLM_PROVIDER", "mimo").strip().lower(),
     }
 

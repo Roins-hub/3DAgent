@@ -89,6 +89,13 @@ class HunyuanConfigTests(unittest.TestCase):
 
 
 class ImageProviderTests(unittest.TestCase):
+    def test_image_provider_defaults_to_openai_image2(self):
+        with test_env({"IMAGE_PROVIDER": ""}):
+            api = load_api()
+
+            self.assertEqual(api.selected_image_provider(), "openai")
+            self.assertEqual(api.openai_image_model(), "gpt-image-2")
+
     def test_image_size_maps_aspect_ratio(self):
         with test_env({"IMAGE_PROVIDER": "siliconflow"}):
             api = load_api()

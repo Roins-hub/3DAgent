@@ -48,3 +48,7 @@ test("does not add desktop fallback for deployed pages", () => {
     "https://api.example.com",
   ]);
 });
+
+test("uses same-origin API for deployed pages when no API base URL is configured", () => {
+  assert.deepEqual(apiBaseUrlCandidates("", "ai.hhlai.xyz"), [""]);
+});

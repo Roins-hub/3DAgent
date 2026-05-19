@@ -15,7 +15,12 @@ export function apiBaseUrlCandidates(
   browserHostname: string | undefined | null,
   preferDesktopApi = false,
 ): string[] {
-  const primary = normalizeApiBaseUrl(primaryBaseUrl);
+  const configuredPrimary = primaryBaseUrl?.trim();
+  const primary = configuredPrimary
+    ? normalizeApiBaseUrl(configuredPrimary)
+    : isLocalHostname(browserHostname)
+      ? DEFAULT_API_BASE_URL
+      : "";
   const candidates = [primary];
 
   if (!isLocalHostname(browserHostname)) {
