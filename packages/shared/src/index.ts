@@ -19,6 +19,7 @@ export interface CreateJobRequest {
   quality: GenerationQuality;
   style: string;
   targetFormat: TargetFormat;
+  clientRequestId?: string;
 }
 
 export interface GenerationJob {
@@ -45,6 +46,7 @@ export interface GenerationJob {
 export interface CreateImageJobRequest {
   prompt: string;
   aspectRatio: ImageAspectRatio;
+  clientRequestId?: string;
 }
 
 export interface ImageJob {

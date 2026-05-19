@@ -35,20 +35,20 @@ const links = [
 
 const industrialLinks = [
   {
-    label: "Chili3D 网页 CAD",
-    description: "浏览器端 CAD 建模页面",
+    label: "智模Web CAD",
+    description: "浏览器端草图、实体编辑与导入导出",
     href: "/industrial/chili3d",
     Icon: Cuboid,
   },
   {
-    label: "CADAM AI 生成 CAD",
-    description: "文本生成参数化 CAD",
+    label: "智模AI CAD",
+    description: "一句工程描述生成参数化 STEP",
     href: "/industrial/cadam",
     Icon: WandSparkles,
   },
   {
-    label: "3D模型生成",
-    description: "先选择家具、文具、工业或文创方向",
+    label: "3D 模型生成",
+    description: "选择家具、文具、工业或文创方向",
     href: "/model",
     Icon: Box,
   },

@@ -4,8 +4,8 @@ import { DesktopNavigationBar } from "@/components/desktop/DesktopNavigationBar"
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "智模精工 AI 工业模型工作台",
-  description: "面向工业设计需求的 AI 工业模型与图像方案工作台",
+  title: "智模精工 | 智模Web CAD 与智模AI CAD",
+  description: "面向工业设计需求的 Web CAD、AI CAD 与工程资产生成工作台",
 };
 
 export default function RootLayout({
@@ -14,10 +14,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="zh-CN"
-      data-scroll-behavior="smooth"
-    >
+    <html lang="zh-CN" data-scroll-behavior="smooth">
       <body>
         <DesktopNavigationBar />
         <AuthProvider>{children}</AuthProvider>

@@ -20,13 +20,14 @@ from uuid import uuid4
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 import requests
 
 GenerationMode = Literal["text-to-3d", "image-to-3d"]
 JobStatus = Literal["queued", "running", "postprocessing", "completed", "failed"]
 TargetFormat = Literal["glb", "fbx", "obj", "stl"]
+ParamcadPreviewFormat = Literal["stl"]
 GenerationQuality = Literal["draft", "balanced", "production"]
 ImageAspectRatio = Literal["1:1", "16:9", "9:16", "4:3", "3:4"]
 
@@ -60,13 +61,20 @@ ADMIN_SECRET_KEYS = {
     "CADAM_OPENAI_API_KEY",
     "DEEPSEEK_API_KEY",
     "CADAM_DEEPSEEK_API_KEY",
+    "CAD_SCRIPT_API_KEY",
     "MIMO_API_KEY",
 }
 ADMIN_VISIBLE_SETTING_KEYS = [
     "MODEL_PROVIDER",
     "IMAGE_PROVIDER",
     "CADAM_LLM_PROVIDER",
-    "AI_PARAMCAD_BASE_URL",
+    "PARAMCAD_ENGINE",
+    "CAD_SCRIPT_SOURCE_ONLY",
+    "CAD_SCRIPT_GENERATOR",
+    "CAD_SCRIPT_BASE_URL",
+    "CAD_SCRIPT_MODEL",
+    "CAD_SCRIPT_API_KEY",
+    "CAD_SCRIPT_REPAIR",
     "OPENAI_IMAGE_MODEL",
     "SILICONFLOW_IMAGE_MODEL",
     "MIMO_CHAT_MODEL",
@@ -109,11 +117,13 @@ class CreateJobRequest(BaseModel):
     quality: GenerationQuality = "balanced"
     style: str = Field(default="game-ready", max_length=80)
     targetFormat: TargetFormat = "glb"
+    clientRequestId: str | None = Field(default=None, max_length=120)
 
 
 class CreateImageJobRequest(BaseModel):
     prompt: str = Field(max_length=1200)
     aspectRatio: ImageAspectRatio = "1:1"
+    clientRequestId: str | None = Field(default=None, max_length=120)
 
 
 class JobMetadata(BaseModel):
@@ -244,6 +254,7 @@ class HelpChatResponse(BaseModel):
 class CadamGenerateRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=2400)
     parameters: dict[str, Any] = Field(default_factory=dict)
+    clientRequestId: str | None = Field(default=None, max_length=120)
 
 
 class CadamGenerateResponse(BaseModel):
@@ -258,6 +269,7 @@ class CadamGenerateResponse(BaseModel):
 class ParamcadRunRequest(BaseModel):
     requirement: str = Field(min_length=1, max_length=2400)
     runFea: bool = False
+    clientRequestId: str | None = Field(default=None, max_length=120)
 
 
 class ParamcadRunResponse(BaseModel):
@@ -274,9 +286,10 @@ class ParamcadRunResponse(BaseModel):
     feaPassed: bool | None = None
     stepFile: str | None = None
     stepDownloadUrl: str | None = None
+    sourceFile: str | None = None
     parameters: dict[str, float] = Field(default_factory=dict)
-    provider: str = "ai-paramcad"
-    model: str = "java-paramcad-engine"
+    provider: str = "cad-script-engine"
+    model: str = "build123d"
 
 
 @dataclass(frozen=True)
@@ -302,6 +315,8 @@ app.add_middleware(
 jobs: dict[str, GenerationJob] = {}
 image_jobs: dict[str, ImageJob] = {}
 job_contexts: dict[str, dict[str, str]] = {}
+idempotent_request_tasks: dict[str, asyncio.Task[Any]] = {}
+idempotent_request_lock = asyncio.Lock()
 auth_user_cache: dict[str, tuple[float, AuthUser]] = {}
 admin_settings_cache: tuple[float, dict[str, dict[str, Any]]] | None = None
 persistence_executor = ThreadPoolExecutor(
@@ -412,6 +427,53 @@ def file_response_for_model(job: GenerationJob, export_format: TargetFormat, pat
         path,
         media_type=model_media_type(export_format),
         filename=f"{job.id}.{export_format}",
+    )
+
+
+def paramcad_output_path(step_file: str) -> Path:
+    if step_file != Path(step_file).name:
+        raise HTTPException(status_code=404, detail="File not found.")
+
+    safe_file = Path(step_file).name
+    if not safe_file.lower().endswith(".step"):
+        raise HTTPException(status_code=404, detail="File not found.")
+
+    local_file = (cad_script_output_dir() / safe_file).resolve()
+    output_root = cad_script_output_dir().resolve()
+    if local_file == output_root or output_root not in local_file.parents or not local_file.is_file():
+        raise HTTPException(status_code=404, detail="File not found.")
+    return local_file
+
+
+def convert_step_to_stl_preview(step_path: Path, stl_path: Path) -> None:
+    try:
+        from build123d import export_stl, import_step
+    except ImportError as exc:
+        raise RuntimeError("build123d is not installed; STEP preview conversion is unavailable.") from exc
+
+    stl_path.parent.mkdir(parents=True, exist_ok=True)
+    export_stl(import_step(step_path), stl_path)
+
+
+def paramcad_preview_file_response(
+    step_file: str, preview_format: ParamcadPreviewFormat
+) -> FileResponse:
+    if preview_format != "stl":
+        raise HTTPException(status_code=404, detail="Preview format not found.")
+
+    step_path = paramcad_output_path(step_file)
+    preview_path = step_path.with_suffix(".stl")
+    if (
+        not preview_path.exists()
+        or preview_path.stat().st_size <= 0
+        or preview_path.stat().st_mtime < step_path.stat().st_mtime
+    ):
+        convert_step_to_stl_preview(step_path, preview_path)
+
+    return FileResponse(
+        preview_path,
+        media_type="model/stl",
+        filename=preview_path.name,
     )
 
 
@@ -530,17 +592,48 @@ def cadam_llm_provider() -> str:
     return runtime_setting_value("CADAM_LLM_PROVIDER", "cascade").strip().lower() or "cascade"
 
 
-def paramcad_base_url() -> str:
-    return runtime_setting_value("AI_PARAMCAD_BASE_URL", "http://localhost:8088").strip().rstrip("/")
+def paramcad_engine() -> str:
+    return runtime_setting_value("PARAMCAD_ENGINE", "cad-script").strip().lower() or "cad-script"
 
 
-def paramcad_timeout_seconds() -> int:
-    raw_value = runtime_setting_value("AI_PARAMCAD_TIMEOUT_SECONDS", "180").strip()
+def cad_script_engine_root() -> Path:
+    return Path(runtime_setting_value("CAD_SCRIPT_ENGINE_ROOT", str(ROOT_DIR / "engines" / "cad-script-engine"))).resolve()
+
+
+def cad_script_output_dir() -> Path:
+    return Path(
+        runtime_setting_value("CAD_SCRIPT_OUTPUT_DIR", str(ROOT_DIR / ".cache" / "generated" / "cad-script"))
+    ).resolve()
+
+
+def cad_script_source_only() -> bool:
+    return runtime_setting_value("CAD_SCRIPT_SOURCE_ONLY", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def cad_script_process_timeout_seconds() -> int:
+    raw_value = runtime_setting_value("CAD_SCRIPT_PROCESS_TIMEOUT_SECONDS", "480").strip()
     try:
         value = int(raw_value)
     except ValueError:
-        return 180
-    return max(30, min(value, 600))
+        return 480
+    return max(60, min(value, 1200))
+
+
+def apply_cad_script_runtime_settings(env: dict[str, str]) -> None:
+    for key in [
+        "CAD_SCRIPT_GENERATOR",
+        "CAD_SCRIPT_API_KEY",
+        "CAD_SCRIPT_BASE_URL",
+        "CAD_SCRIPT_MODEL",
+        "CAD_SCRIPT_REPAIR",
+        "CAD_SCRIPT_TIMEOUT_SECONDS",
+        "CAD_SCRIPT_PROCESS_TIMEOUT_SECONDS",
+        "DEEPSEEK_API_KEY",
+        "CADAM_DEEPSEEK_API_KEY",
+    ]:
+        value = runtime_setting_value(key, "").strip()
+        if value:
+            env[key] = value
 
 
 def cadam_deepseek_base_url() -> str:
@@ -1161,50 +1254,91 @@ def proxied_paramcad_download_url(step_file: str | None) -> str | None:
 
 
 def run_paramcad_engine(request: ParamcadRunRequest) -> ParamcadRunResponse:
-    base_url = paramcad_base_url()
-    if not base_url:
-        raise HTTPException(status_code=503, detail="AI-ParamCAD base URL is not configured.")
+    engine = paramcad_engine()
+    if engine in {"cad-script", "cad_script", "cad-script-engine"}:
+        return run_cad_script_paramcad_engine(request)
+    raise HTTPException(status_code=400, detail="PARAMCAD_ENGINE must be cad-script.")
 
+
+def run_cad_script_paramcad_engine(request: ParamcadRunRequest) -> ParamcadRunResponse:
+    engine_root = cad_script_engine_root()
+    output_dir = cad_script_output_dir()
+    if not engine_root.exists():
+        raise HTTPException(status_code=503, detail=f"CAD script engine is missing: {engine_root}")
+
+    env = os.environ.copy()
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = str(engine_root) if not existing_pythonpath else f"{engine_root}{os.pathsep}{existing_pythonpath}"
+    apply_cad_script_runtime_settings(env)
+    args = [
+        os.sys.executable,
+        "-m",
+        "cad_script_engine.cli",
+        "--prompt",
+        request.requirement.strip(),
+        "--output-dir",
+        str(output_dir),
+    ]
+    if cad_script_source_only():
+        args.append("--source-only")
+
+    timeout_seconds = cad_script_process_timeout_seconds()
     try:
-        response = requests.post(
-            f"{base_url}/api/run",
-            json={"requirement": request.requirement.strip(), "runFea": request.runFea},
-            timeout=paramcad_timeout_seconds(),
+        completed = subprocess.run(
+            args,
+            cwd=str(ROOT_DIR),
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=timeout_seconds,
         )
-    except requests.RequestException as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=f"AI-ParamCAD service is unavailable: {exc}",
-        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=504, detail=f"CAD script engine timed out after {timeout_seconds} seconds.") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail=f"CAD script engine is unavailable: {exc}") from exc
 
-    if response.status_code >= 400:
-        body = response.text[:800]
-        raise HTTPException(status_code=502, detail=f"AI-ParamCAD request failed: HTTP {response.status_code} {body}")
-
-    payload = response.json()
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=502, detail="AI-ParamCAD returned an invalid response.")
-
-    step_file = payload.get("stepFile") if isinstance(payload.get("stepFile"), str) else None
+    payload = _cad_script_payload_from_process(completed)
+    step_file = _cad_script_step_filename(payload.get("stepFile"))
+    message = str(payload.get("error")) if payload.get("error") else None
     result = ParamcadRunResponse(
         success=bool(payload.get("success")),
-        message=str(payload.get("message")) if payload.get("message") is not None else None,
+        message=message,
         title=str(payload.get("title")) if payload.get("title") is not None else None,
-        domain=str(payload.get("domain")) if payload.get("domain") is not None else None,
-        material=str(payload.get("material")) if payload.get("material") is not None else None,
         geometryType=str(payload.get("geometryType")) if payload.get("geometryType") is not None else None,
-        score=float(payload["score"]) if isinstance(payload.get("score"), (int, float)) else None,
-        iterations=int(payload["iterations"]) if isinstance(payload.get("iterations"), (int, float)) else None,
-        safetyFactor=float(payload["safetyFactor"]) if isinstance(payload.get("safetyFactor"), (int, float)) else None,
-        maxStress=float(payload["maxStress"]) if isinstance(payload.get("maxStress"), (int, float)) else None,
-        feaPassed=bool(payload["feaPassed"]) if isinstance(payload.get("feaPassed"), bool) else None,
         stepFile=step_file,
         stepDownloadUrl=proxied_paramcad_download_url(step_file),
+        sourceFile=str(payload.get("sourceFile")) if payload.get("sourceFile") is not None else None,
         parameters=payload.get("parameters") if isinstance(payload.get("parameters"), dict) else {},
+        provider="cad-script-engine",
+        model="build123d",
     )
     if not result.success:
-        raise HTTPException(status_code=502, detail=result.message or "AI-ParamCAD pipeline failed.")
+        detail = result.message or "CAD script engine failed."
+        if completed.stderr:
+            detail = f"{detail} {completed.stderr[:800]}"
+        raise HTTPException(status_code=502, detail=detail)
     return result
+
+
+def _cad_script_payload_from_process(completed: subprocess.CompletedProcess[str]) -> dict[str, Any]:
+    stdout = completed.stdout.strip()
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        detail = completed.stderr[:800] or stdout[:800] or "empty output"
+        raise HTTPException(status_code=502, detail=f"CAD script engine returned invalid JSON: {detail}") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=502, detail="CAD script engine returned an invalid response.")
+    if completed.returncode != 0 and payload.get("success") is not False:
+        detail = payload.get("error") or completed.stderr[:800] or f"exit code {completed.returncode}"
+        raise HTTPException(status_code=502, detail=f"CAD script engine failed: {detail}")
+    return payload
+
+
+def _cad_script_step_filename(value: Any) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return Path(value).name
 
 
 def repair_main_module_defaults(scad: str, parameters: dict[str, Any]) -> str:
@@ -1783,6 +1917,7 @@ def cadam_response_to_history_row(
             "model": response.model,
             "parameters": response.parameters,
             "scad": response.scad,
+            "clientRequestId": normalized_client_request_id(request.clientRequestId),
         },
         "created_at": timestamp,
         "updated_at": timestamp,
@@ -1811,7 +1946,10 @@ def failed_cadam_history_row(
         "result_url": None,
         "thumbnail_url": None,
         "error": error,
-        "metadata": {"parameters": request.parameters},
+        "metadata": {
+            "parameters": request.parameters,
+            "clientRequestId": normalized_client_request_id(request.clientRequestId),
+        },
         "created_at": timestamp,
         "updated_at": timestamp,
     }
@@ -1859,9 +1997,11 @@ def paramcad_response_to_history_row(
             "feaPassed": response.feaPassed,
             "stepFile": response.stepFile,
             "stepDownloadUrl": response.stepDownloadUrl,
+            "sourceFile": response.sourceFile,
             "provider": response.provider,
             "model": response.model,
             "runFea": request.runFea,
+            "clientRequestId": normalized_client_request_id(request.clientRequestId),
         },
         "created_at": timestamp,
         "updated_at": timestamp,
@@ -1890,7 +2030,11 @@ def failed_paramcad_history_row(
         "result_url": None,
         "thumbnail_url": None,
         "error": error,
-        "metadata": {"runFea": request.runFea, "provider": "ai-paramcad"},
+        "metadata": {
+            "runFea": request.runFea,
+            "provider": "cad-script-engine",
+            "clientRequestId": normalized_client_request_id(request.clientRequestId),
+        },
         "created_at": timestamp,
         "updated_at": timestamp,
     }
@@ -1901,6 +2045,38 @@ def try_insert_paramcad_history_row(row: dict[str, Any], authorization: str) -> 
         insert_history_row(row, authorization)
     except Exception as exc:
         print(f"Supabase ParamCAD history insert skipped for job {row.get('id')}: {exc}")
+
+
+def normalized_client_request_id(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = re.sub(r"[^A-Za-z0-9_-]+", "-", value.strip()).strip("-")
+    return normalized[:120] or None
+
+
+async def run_idempotent_request(
+    operation: str,
+    client_request_id: str | None,
+    user: AuthUser | None,
+    factory,
+):
+    normalized = normalized_client_request_id(client_request_id)
+    if not normalized:
+        return await factory()
+
+    user_key = user.id if user else "anonymous"
+    task_key = f"{operation}:{user_key}:{normalized}"
+    async with idempotent_request_lock:
+        task = idempotent_request_tasks.get(task_key)
+        if task is None:
+            task = asyncio.create_task(factory())
+            idempotent_request_tasks[task_key] = task
+            if len(idempotent_request_tasks) > 512:
+                completed_keys = [key for key, value in idempotent_request_tasks.items() if value.done()]
+                for key in completed_keys[:256]:
+                    if key != task_key:
+                        idempotent_request_tasks.pop(key, None)
+    return await task
 
 
 def history_row_to_generation_job(row: dict[str, Any]) -> GenerationJob:
@@ -3635,6 +3811,19 @@ async def cadam_generate(
 
     auth_header = authorization if isinstance(authorization, str) and authorization.strip() else None
     user = verify_supabase_user(auth_header) if auth_header else None
+    return await run_idempotent_request(
+        "cadam-generate",
+        request.clientRequestId,
+        user,
+        lambda: _cadam_generate_once(request, user, auth_header),
+    )
+
+
+async def _cadam_generate_once(
+    request: CadamGenerateRequest,
+    user: AuthUser | None,
+    auth_header: str | None,
+) -> CadamGenerateResponse:
     job_id = str(uuid4())
     timestamp = now_iso()
     try:
@@ -3665,6 +3854,19 @@ async def paramcad_run(
 
     auth_header = authorization if isinstance(authorization, str) and authorization.strip() else None
     user = verify_supabase_user(auth_header) if auth_header else None
+    return await run_idempotent_request(
+        "paramcad-run",
+        request.clientRequestId,
+        user,
+        lambda: _run_paramcad_and_record_history(request, user, auth_header),
+    )
+
+
+async def _run_paramcad_and_record_history(
+    request: ParamcadRunRequest,
+    user: AuthUser | None,
+    auth_header: str | None,
+) -> ParamcadRunResponse:
     job_id = str(uuid4())
     timestamp = now_iso()
     try:
@@ -3687,29 +3889,32 @@ async def paramcad_run(
 
 @app.get("/api/paramcad/outputs/{step_file}")
 async def paramcad_output_file(step_file: str):
-    safe_file = Path(step_file).name
-    if not safe_file:
-        raise HTTPException(status_code=404, detail="File not found.")
+    local_file = paramcad_output_path(step_file)
+    return Response(
+        content=local_file.read_bytes(),
+        media_type="application/step",
+        headers={"Content-Disposition": f'attachment; filename="{local_file.name}"'},
+    )
 
-    base_url = paramcad_base_url()
-    try:
-        response = requests.get(
-            f"{base_url}/outputs/{quote(safe_file)}",
-            timeout=paramcad_timeout_seconds(),
-            stream=True,
-        )
-    except requests.RequestException as exc:
-        raise HTTPException(status_code=503, detail=f"AI-ParamCAD service is unavailable: {exc}") from exc
 
-    if response.status_code == 404:
-        raise HTTPException(status_code=404, detail="File not found.")
-    if response.status_code >= 400:
-        raise HTTPException(status_code=502, detail=f"AI-ParamCAD download failed: HTTP {response.status_code}")
+@app.get("/api/paramcad/outputs/{step_file}/preview.{preview_format}")
+async def paramcad_preview_file(step_file: str, preview_format: ParamcadPreviewFormat):
+    if preview_format != "stl":
+        raise HTTPException(status_code=404, detail="Preview format not found.")
 
-    return StreamingResponse(
-        response.iter_content(chunk_size=64 * 1024),
-        media_type=response.headers.get("content-type", "application/step"),
-        headers={"Content-Disposition": f'attachment; filename="{safe_file}"'},
+    step_path = paramcad_output_path(step_file)
+    preview_path = step_path.with_suffix(".stl")
+    if (
+        not preview_path.exists()
+        or preview_path.stat().st_size <= 0
+        or preview_path.stat().st_mtime < step_path.stat().st_mtime
+    ):
+        await asyncio.to_thread(convert_step_to_stl_preview, step_path, preview_path)
+
+    return Response(
+        content=preview_path.read_bytes(),
+        media_type="model/stl",
+        headers={"Content-Disposition": f'inline; filename="{preview_path.name}"'},
     )
 
 
@@ -3720,6 +3925,19 @@ async def create_job(
 ) -> GenerationJob:
     user = verify_supabase_user(authorization)
     assert authorization is not None
+    return await run_idempotent_request(
+        "create-job",
+        request.clientRequestId,
+        user,
+        lambda: _create_job_once(request, authorization, user),
+    )
+
+
+async def _create_job_once(
+    request: CreateJobRequest,
+    authorization: str,
+    user: AuthUser,
+) -> GenerationJob:
     prompt = request.prompt.strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="Prompt is required.")
@@ -3795,6 +4013,19 @@ async def create_image_job(
 ) -> ImageJob:
     user = await verify_supabase_user_async(authorization)
     assert authorization is not None
+    return await run_idempotent_request(
+        "create-image-job",
+        request.clientRequestId,
+        user,
+        lambda: _create_image_job_once(request, authorization, user),
+    )
+
+
+async def _create_image_job_once(
+    request: CreateImageJobRequest,
+    authorization: str,
+    user: AuthUser,
+) -> ImageJob:
     prompt = request.prompt.strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="Prompt is required.")
@@ -3834,6 +4065,8 @@ async def create_image_job(
 
     if provider == "openai":
         asyncio.create_task(run_openai_image_generation(job.id, request))
+    elif provider == "mock":
+        asyncio.create_task(simulate_image_generation(job.id))
     else:
         asyncio.create_task(run_siliconflow_image_generation(job.id, request))
     return job

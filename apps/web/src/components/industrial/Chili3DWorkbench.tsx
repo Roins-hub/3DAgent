@@ -16,10 +16,10 @@ export function Chili3DWorkbench() {
   }, [frameKey]);
 
   return (
-    <section className="chili-workbench" aria-label="智模精工 CAD 工作台">
+    <section className="chili-workbench" aria-label="智模Web CAD 工作台">
       <div className="chili-workbench-bar">
         <div>
-          <p>智模精工</p>
+          <p>智模Web CAD</p>
           <span>网页 CAD 建模、草图、实体编辑与导入导出</span>
         </div>
         <div className="chili-workbench-actions">
@@ -29,7 +29,7 @@ export function Chili3DWorkbench() {
               setIsLoading(true);
               setFrameKey((key) => key + 1);
             }}
-            aria-label="重新加载智模精工"
+            aria-label="重新加载智模Web CAD"
           >
             <RefreshCw size={16} />
             刷新
@@ -38,7 +38,7 @@ export function Chili3DWorkbench() {
             <ExternalLink size={16} />
             新窗口
           </a>
-          <a href={CAD_URL} target="_blank" rel="noreferrer" aria-label="全屏打开智模精工">
+          <a href={CAD_URL} target="_blank" rel="noreferrer" aria-label="全屏打开智模Web CAD">
             <Maximize2 size={16} />
           </a>
         </div>
@@ -48,13 +48,13 @@ export function Chili3DWorkbench() {
         {isLoading ? (
           <div className="chili-frame-loading">
             <Loader2 size={26} />
-            <span>正在载入智模精工...</span>
+            <span>正在载入智模Web CAD...</span>
           </div>
         ) : null}
         <iframe
           key={frameKey}
           src={CAD_URL}
-          title="智模精工"
+          title="智模Web CAD"
           referrerPolicy="strict-origin-when-cross-origin"
           allow="fullscreen; clipboard-read; clipboard-write"
           onLoad={() => setIsLoading(false)}

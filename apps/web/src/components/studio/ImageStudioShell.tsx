@@ -16,7 +16,7 @@ import {
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { API_BASE_URL, api } from "@/lib/api";
+import { API_BASE_URL, api, createClientRequestId } from "@/lib/api";
 import { getAuthHeaders } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { StatusBadge } from "@/components/ui/StatusBadge";
@@ -234,6 +234,7 @@ export function ImageStudioShell() {
       const job = await api.createImageJob({
         prompt,
         aspectRatio,
+        clientRequestId: createClientRequestId(),
       });
       setJobs((items) => [job, ...items]);
       setActiveJobId(job.id);

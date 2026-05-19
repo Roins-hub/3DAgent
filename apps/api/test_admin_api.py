@@ -98,6 +98,7 @@ class AdminApiTests(unittest.TestCase):
                             {"kind": "3d", "status": "completed", "created_at": "2026-05-06T01:00:00+00:00"},
                             {"kind": "image", "status": "failed", "created_at": "2026-05-06T02:00:00+00:00"},
                             {"kind": "3d", "status": "running", "created_at": "2026-05-05T01:00:00+00:00"},
+                            {"kind": "paramcad", "status": "completed", "created_at": "2026-05-05T02:00:00+00:00"},
                         ]
                     )
                 raise AssertionError(path)
@@ -109,10 +110,11 @@ class AdminApiTests(unittest.TestCase):
                 summary = asyncio.run(api.admin_summary("Bearer token"))
 
         self.assertEqual(summary.totalUsers, 2)
-        self.assertEqual(summary.totalJobs, 3)
+        self.assertEqual(summary.totalJobs, 4)
         self.assertEqual(summary.failedJobs, 1)
         self.assertEqual(summary.imageJobs, 1)
         self.assertEqual(summary.modelJobs, 2)
+        self.assertEqual(summary.paramcadJobs, 1)
 
     def test_admin_generation_jobs_allows_cadam_filter(self):
         with test_env():
@@ -144,6 +146,38 @@ class AdminApiTests(unittest.TestCase):
 
         self.assertEqual(result["jobs"][0]["kind"], "cadam")
         self.assertIn("kind=eq.cadam", calls[0][1])
+
+    def test_admin_generation_jobs_allows_paramcad_filter(self):
+        with test_env():
+            api = load_api()
+            calls = []
+
+            def fake_admin_request(method, path, **kwargs):
+                calls.append((method, path, kwargs))
+                return response_mock(
+                    [
+                        {
+                            "id": "paramcad-1",
+                            "user_id": "user-1",
+                            "kind": "paramcad",
+                            "prompt": "design a spindle shaft",
+                            "status": "completed",
+                            "progress": 100,
+                            "target_format": "step",
+                            "created_at": "2026-05-08T01:00:00+00:00",
+                            "updated_at": "2026-05-08T01:00:00+00:00",
+                        }
+                    ]
+                )
+
+            with (
+                patch.object(api, "verify_admin_user", return_value=api.AuthUser(id="admin-1", email="admin@example.com")),
+                patch.object(api, "supabase_admin_request", side_effect=fake_admin_request),
+            ):
+                result = asyncio.run(api.admin_list_generation_jobs(kind="paramcad", authorization="Bearer token"))
+
+        self.assertEqual(result["jobs"][0]["kind"], "paramcad")
+        self.assertIn("kind=eq.paramcad", calls[0][1])
 
     def test_admin_retry_cadam_job_creates_completed_cadam_history_row(self):
         with test_env():
@@ -197,6 +231,66 @@ class AdminApiTests(unittest.TestCase):
         self.assertEqual(inserted["progress"], 100)
         self.assertEqual(inserted["metadata"]["retried_from"], "cadam-source")
         self.assertEqual(inserted["metadata"]["scad"], generated.scad)
+
+    def test_admin_retry_paramcad_job_creates_completed_paramcad_history_row(self):
+        with test_env():
+            api = load_api()
+            calls = []
+            source_row = {
+                "id": "paramcad-source",
+                "user_id": "user-1",
+                "kind": "paramcad",
+                "prompt": "design a spindle shaft",
+                "status": "completed",
+                "progress": 100,
+                "target_format": "step",
+                "metadata": {"runFea": True},
+                "created_at": "2026-05-08T01:00:00+00:00",
+                "updated_at": "2026-05-08T01:00:00+00:00",
+            }
+            generated = api.ParamcadRunResponse(
+                success=True,
+                title="spindle shaft",
+                material="42CrMo",
+                geometryType="stepped_shaft",
+                score=93.5,
+                iterations=12,
+                safetyFactor=2.1,
+                maxStress=180.0,
+                feaPassed=True,
+                stepFile="spindle.step",
+                stepDownloadUrl="/api/paramcad/outputs/spindle.step",
+                parameters={"length": 240.0},
+            )
+
+            def fake_admin_request(method, path, **kwargs):
+                calls.append((method, path, kwargs))
+                if method == "GET" and path.startswith("generation_jobs?id=eq."):
+                    return response_mock([source_row])
+                return response_mock([])
+
+            with (
+                patch.object(api, "verify_admin_user", return_value=api.AuthUser(id="admin-1", email="admin@example.com")),
+                patch.object(api, "supabase_admin_request", side_effect=fake_admin_request),
+                patch.object(api, "supabase_service_role_key", return_value="service-role"),
+                patch.object(api, "run_paramcad_engine", return_value=generated),
+            ):
+                result = asyncio.run(
+                    api.admin_update_generation_job(
+                        "paramcad-source",
+                        api.AdminGenerationJobAction(action="retry"),
+                        "Bearer token",
+                    )
+                )
+
+        inserted = next(call[2]["json_body"] for call in calls if call[0] == "POST" and call[1] == "generation_jobs")
+        self.assertEqual(result["job"]["kind"], "paramcad")
+        self.assertEqual(inserted["kind"], "paramcad")
+        self.assertEqual(inserted["status"], "completed")
+        self.assertEqual(inserted["target_format"], "step")
+        self.assertEqual(inserted["result_url"], "/api/paramcad/outputs/spindle.step")
+        self.assertEqual(inserted["metadata"]["retried_from"], "paramcad-source")
+        self.assertEqual(inserted["metadata"]["runFea"], True)
 
     def test_soft_restore_and_hard_delete_generation_job_write_audit_log(self):
         with test_env():
@@ -265,6 +359,32 @@ class AdminApiTests(unittest.TestCase):
         self.assertTrue(secret.isConfigured)
         self.assertIn("MODEL_PROVIDER=hunyuan", env_text)
         self.assertIn("OPENAI_API_KEY=sk-secret", env_text)
+
+    def test_cad_script_api_key_is_secret_visible_setting(self):
+        with test_env({"CAD_SCRIPT_API_KEY": "sk-cad-script"}):
+            api = load_api()
+
+            self.assertIn("CAD_SCRIPT_API_KEY", api.ADMIN_VISIBLE_SETTING_KEYS)
+            self.assertIn("CAD_SCRIPT_API_KEY", api.ADMIN_SECRET_KEYS)
+
+            merged = api.merge_settings_with_environment([])
+            cad_key = next(item for item in merged if item["key"] == "CAD_SCRIPT_API_KEY")
+
+        self.assertTrue(cad_key["is_secret"])
+        self.assertEqual(cad_key["value"], "sk-cad-script")
+
+    def test_legacy_ai_paramcad_settings_are_not_visible(self):
+        with test_env({"AI_PARAMCAD_BASE_URL": "http://localhost:8088"}):
+            api = load_api()
+
+            self.assertNotIn("AI_PARAMCAD_BASE_URL", api.ADMIN_VISIBLE_SETTING_KEYS)
+            self.assertNotIn("AI_PARAMCAD_TIMEOUT_SECONDS", api.ADMIN_VISIBLE_SETTING_KEYS)
+
+            merged = api.merge_settings_with_environment([])
+            keys = {item["key"] for item in merged}
+
+        self.assertNotIn("AI_PARAMCAD_BASE_URL", keys)
+        self.assertNotIn("AI_PARAMCAD_TIMEOUT_SECONDS", keys)
 
 
 if __name__ == "__main__":

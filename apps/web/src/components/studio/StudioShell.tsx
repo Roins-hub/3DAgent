@@ -13,7 +13,7 @@ import {
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { API_BASE_URL, api } from "@/lib/api";
+import { API_BASE_URL, api, createClientRequestId } from "@/lib/api";
 import { getAuthHeaders } from "@/lib/supabase";
 import { useGenerationStore } from "@/store/useGenerationStore";
 import { Button } from "@/components/ui/Button";
@@ -160,6 +160,7 @@ export function StudioShell() {
         quality: "balanced",
         style: "game-ready",
         targetFormat: exportFormat,
+        clientRequestId: createClientRequestId(),
       });
       upsertJob(job);
       setActiveJobId(job.id);

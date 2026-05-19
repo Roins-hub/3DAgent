@@ -36,6 +36,52 @@ def response_mock(payload, status_code=200):
 
 
 class HistoryPersistenceTests(unittest.TestCase):
+    def test_create_job_deduplicates_same_client_request_id(self):
+        with test_env({"MODEL_PROVIDER": "mock"}):
+            api = load_api()
+            request = api.CreateJobRequest(prompt="make a gearbox", clientRequestId="model-request-1")
+
+            async def noop_generation(_job_id):
+                return None
+
+            async def run_endpoint_twice():
+                first = await api.create_job(request, "Bearer test-token")
+                second = await api.create_job(request, "Bearer test-token")
+                return first, second
+
+            with (
+                patch.object(api, "verify_supabase_user", return_value=api.AuthUser(id="user-1", email="u@example.com")),
+                patch.object(api, "insert_history_row") as insert_history,
+                patch.object(api, "simulate_generation", side_effect=noop_generation),
+            ):
+                first, second = asyncio.run(run_endpoint_twice())
+
+        self.assertEqual(first.id, second.id)
+        insert_history.assert_called_once()
+
+    def test_create_image_job_deduplicates_same_client_request_id(self):
+        with test_env({"IMAGE_PROVIDER": "mock"}):
+            api = load_api()
+            request = api.CreateImageJobRequest(prompt="make a product render", clientRequestId="image-request-1")
+
+            async def noop_generation(_job_id):
+                return None
+
+            async def run_endpoint_twice():
+                first = await api.create_image_job(request, "Bearer test-token")
+                second = await api.create_image_job(request, "Bearer test-token")
+                return first, second
+
+            with (
+                patch.object(api, "verify_supabase_user_async", return_value=api.AuthUser(id="user-1", email="u@example.com")),
+                patch.object(api, "insert_history_row_async") as insert_history,
+                patch.object(api, "simulate_image_generation", side_effect=noop_generation),
+            ):
+                first, second = asyncio.run(run_endpoint_twice())
+
+        self.assertEqual(first.id, second.id)
+        insert_history.assert_called_once()
+
     def test_auth_verification_uses_short_lived_cache(self):
         with test_env():
             api = load_api()

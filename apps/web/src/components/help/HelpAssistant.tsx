@@ -15,10 +15,10 @@ type ChatMessage = HelpChatMessage & {
 };
 
 const quickPrompts = [
-  "如何让 AI 先给出 CAD 参数值？",
-  "拿到 CAD 参数后怎么建模？",
-  "如何生成一个工业设计用的3D模型？",
-  "生成好的模型怎么下载？",
+  "智模AI CAD 怎么生成 STEP？",
+  "智模Web CAD 怎么打开和编辑文件？",
+  "生成失败或预览失败怎么排查？",
+  "CAD 任务历史和下载入口在哪里？",
 ];
 
 function createMessage(
@@ -42,7 +42,7 @@ export function HelpAssistant() {
   const [messages, setMessages] = React.useState<ChatMessage[]>([
     createMessage(
       "assistant",
-      "你好，我是智模精工的 AI 帮助助手。你可以问我账号登录、CAD 参数获取、CADAM 参数化建模、工业模型生成、图片生成、模型下载和常见报错。",
+      "你好，我是智模精工的 AI 帮助助手。你可以问我智模AI CAD 的需求写法、参数化建模、STEP 导出、预览加载、智模Web CAD 复核编辑、任务历史、模型下载和常见报错。",
     ),
   ]);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
@@ -112,9 +112,10 @@ export function HelpAssistant() {
   }
 
   return (
-    <section className="help-assistant" aria-label="AI 帮助助手">
+    <section className="help-assistant" aria-label="智模CAD AI 帮助助手">
       <div className="help-assistant-header">
-        <h1>How Can I Help You</h1>
+        <p>AI CAD Support</p>
+        <h1>智模CAD 小助手</h1>
       </div>
 
       <div className="help-quick-prompts" aria-label="快捷问题">
@@ -175,7 +176,7 @@ export function HelpAssistant() {
           onValueChange={setInput}
           onSubmit={sendPrompt}
           isSubmitting={isSubmitting}
-          placeholder="询问 CAD 参数值、CADAM 建模、工业模型生成、图片生成、账号登录或常见错误..."
+          placeholder="询问智模AI CAD、Web CAD 编辑、STEP 下载、预览加载、账号登录或常见错误..."
           className="help-prompt-box"
         />
       </div>

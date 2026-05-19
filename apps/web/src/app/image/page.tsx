@@ -1,3 +1,4 @@
+import { AuthGate } from "@/components/auth/AuthGate";
 import { Header } from "@/components/ui/header-2";
 import {
   InteractiveSelector,
@@ -23,15 +24,17 @@ const imageTypes: InteractiveSelectorOption[] = [
 
 export default function ImageGatewayPage() {
   return (
-    <main className="model-gateway image-gateway">
-      <Header />
-      <InteractiveSelector
-        eyebrow="Image Generation"
-        title="选择图片生成类型"
-        subtitle="选择一个方向，进入对应的图片生成工作台。"
-        ctaLabel="开始创作"
-        options={imageTypes}
-      />
-    </main>
+    <AuthGate>
+      <main className="model-gateway image-gateway">
+        <Header />
+        <InteractiveSelector
+          eyebrow="Image Generation"
+          title="选择图片生成类型"
+          subtitle="选择一个方向，进入对应的图片生成工作台。"
+          ctaLabel="开始创作"
+          options={imageTypes}
+        />
+      </main>
+    </AuthGate>
   );
 }

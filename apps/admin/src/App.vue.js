@@ -30,6 +30,42 @@ const editableSettings = [
         placeholder: "mimo / openai",
     },
     {
+        key: "PARAMCAD_ENGINE",
+        label: "工程 CAD 引擎",
+        secret: false,
+        placeholder: "cad-script",
+    },
+    {
+        key: "CAD_SCRIPT_GENERATOR",
+        label: "CAD Script Generator",
+        secret: false,
+        placeholder: "local / llm",
+    },
+    {
+        key: "CAD_SCRIPT_BASE_URL",
+        label: "CAD Script Base URL",
+        secret: false,
+        placeholder: "https://api.deepseek.com",
+    },
+    {
+        key: "CAD_SCRIPT_MODEL",
+        label: "CAD Script Model",
+        secret: false,
+        placeholder: "deepseek-v4-pro",
+    },
+    {
+        key: "CAD_SCRIPT_REPAIR",
+        label: "CAD Script Repair",
+        secret: false,
+        placeholder: "true / false",
+    },
+    {
+        key: "CAD_SCRIPT_API_KEY",
+        label: "CAD Script API Key",
+        secret: true,
+        placeholder: "not configured",
+    },
+    {
         key: "OPENAI_IMAGE_MODEL",
         label: "OpenAI 图片模型",
         secret: false,
@@ -128,6 +164,7 @@ const jobKindOptions = [
     { label: "三维", value: "3d" },
     { label: "图片", value: "image" },
     { label: "CADAM", value: "cadam" },
+    { label: "工程 CAD", value: "paramcad" },
 ];
 const jobStatusOptions = [
     { label: "全部状态", value: "" },
@@ -144,6 +181,8 @@ const jobKindLabel = (kind) => {
         return "图片";
     if (kind === "cadam")
         return "CADAM";
+    if (kind === "paramcad")
+        return "工程 CAD";
     return kind;
 };
 function formatDate(value) {
@@ -1004,24 +1043,46 @@ else {
         /** @ts-ignore @type { | typeof __VLS_components.NCard | typeof __VLS_components.NCard} */
         NCard;
         // @ts-ignore
-        const __VLS_180 = __VLS_asFunctionalComponent1(__VLS_179, new __VLS_179({
+        const __VLS_180 = __VLS_asFunctionalComponent1(__VLS_179, new __VLS_179({}));
+        const __VLS_181 = __VLS_180({}, ...__VLS_functionalComponentArgsRest(__VLS_180));
+        const { default: __VLS_184 } = __VLS_182.slots;
+        let __VLS_185;
+        /** @ts-ignore @type { | typeof __VLS_components.NStatistic} */
+        NStatistic;
+        // @ts-ignore
+        const __VLS_186 = __VLS_asFunctionalComponent1(__VLS_185, new __VLS_185({
+            label: "工程 CAD",
+            value: (__VLS_ctx.summary?.paramcadJobs ?? 0),
+        }));
+        const __VLS_187 = __VLS_186({
+            label: "工程 CAD",
+            value: (__VLS_ctx.summary?.paramcadJobs ?? 0),
+        }, ...__VLS_functionalComponentArgsRest(__VLS_186));
+        // @ts-ignore
+        [summary,];
+        var __VLS_182;
+        let __VLS_190;
+        /** @ts-ignore @type { | typeof __VLS_components.NCard | typeof __VLS_components.NCard} */
+        NCard;
+        // @ts-ignore
+        const __VLS_191 = __VLS_asFunctionalComponent1(__VLS_190, new __VLS_190({
             title: "最近失败任务",
         }));
-        const __VLS_181 = __VLS_180({
+        const __VLS_192 = __VLS_191({
             title: "最近失败任务",
-        }, ...__VLS_functionalComponentArgsRest(__VLS_180));
-        const { default: __VLS_184 } = __VLS_182.slots;
+        }, ...__VLS_functionalComponentArgsRest(__VLS_191));
+        const { default: __VLS_195 } = __VLS_193.slots;
         if (__VLS_ctx.recentFailedJobs.length === 0) {
-            let __VLS_185;
+            let __VLS_196;
             /** @ts-ignore @type { | typeof __VLS_components.NEmpty} */
             NEmpty;
             // @ts-ignore
-            const __VLS_186 = __VLS_asFunctionalComponent1(__VLS_185, new __VLS_185({
+            const __VLS_197 = __VLS_asFunctionalComponent1(__VLS_196, new __VLS_196({
                 description: "暂无失败任务",
             }));
-            const __VLS_187 = __VLS_186({
+            const __VLS_198 = __VLS_197({
                 description: "暂无失败任务",
-            }, ...__VLS_functionalComponentArgsRest(__VLS_186));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_197));
         }
         else {
             __VLS_asFunctionalElement1(__VLS_intrinsics.div, __VLS_intrinsics.div)({
@@ -1037,75 +1098,39 @@ else {
                 (job.prompt);
                 __VLS_asFunctionalElement1(__VLS_intrinsics.span, __VLS_intrinsics.span)({});
                 (job.error || "无错误详情");
-                let __VLS_190;
+                let __VLS_201;
                 /** @ts-ignore @type { | typeof __VLS_components.NTag | typeof __VLS_components.NTag} */
                 NTag;
                 // @ts-ignore
-                const __VLS_191 = __VLS_asFunctionalComponent1(__VLS_190, new __VLS_190({
+                const __VLS_202 = __VLS_asFunctionalComponent1(__VLS_201, new __VLS_201({
                     type: "error",
                     size: "small",
                 }));
-                const __VLS_192 = __VLS_191({
+                const __VLS_203 = __VLS_202({
                     type: "error",
                     size: "small",
-                }, ...__VLS_functionalComponentArgsRest(__VLS_191));
-                const { default: __VLS_195 } = __VLS_193.slots;
+                }, ...__VLS_functionalComponentArgsRest(__VLS_202));
+                const { default: __VLS_206 } = __VLS_204.slots;
                 (__VLS_ctx.formatDate(job.createdAt));
                 // @ts-ignore
                 [recentFailedJobs, recentFailedJobs, formatDate,];
-                var __VLS_193;
+                var __VLS_204;
                 // @ts-ignore
                 [];
             }
         }
         // @ts-ignore
         [];
-        var __VLS_182;
-        let __VLS_196;
-        /** @ts-ignore @type { | typeof __VLS_components.NCard | typeof __VLS_components.NCard} */
-        NCard;
-        // @ts-ignore
-        const __VLS_197 = __VLS_asFunctionalComponent1(__VLS_196, new __VLS_196({
-            title: "最近生成记录",
-        }));
-        const __VLS_198 = __VLS_197({
-            title: "最近生成记录",
-        }, ...__VLS_functionalComponentArgsRest(__VLS_197));
-        const { default: __VLS_201 } = __VLS_199.slots;
-        let __VLS_202;
-        /** @ts-ignore @type { | typeof __VLS_components.NDataTable} */
-        NDataTable;
-        // @ts-ignore
-        const __VLS_203 = __VLS_asFunctionalComponent1(__VLS_202, new __VLS_202({
-            columns: (__VLS_ctx.jobColumns.slice(0, 6)),
-            data: (__VLS_ctx.summary?.recentJobs ?? []),
-            pagination: ({ pageSize: 8 }),
-            bordered: (false),
-        }));
-        const __VLS_204 = __VLS_203({
-            columns: (__VLS_ctx.jobColumns.slice(0, 6)),
-            data: (__VLS_ctx.summary?.recentJobs ?? []),
-            pagination: ({ pageSize: 8 }),
-            bordered: (false),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_203));
-        // @ts-ignore
-        [summary, jobColumns,];
-        var __VLS_199;
-    }
-    if (__VLS_ctx.currentView === 'users') {
-        __VLS_asFunctionalElement1(__VLS_intrinsics.section, __VLS_intrinsics.section)({
-            ...{ class: "view-stack" },
-        });
-        /** @type {__VLS_StyleScopedClasses['view-stack']} */ ;
+        var __VLS_193;
         let __VLS_207;
         /** @ts-ignore @type { | typeof __VLS_components.NCard | typeof __VLS_components.NCard} */
         NCard;
         // @ts-ignore
         const __VLS_208 = __VLS_asFunctionalComponent1(__VLS_207, new __VLS_207({
-            title: "用户管理",
+            title: "最近生成记录",
         }));
         const __VLS_209 = __VLS_208({
-            title: "用户管理",
+            title: "最近生成记录",
         }, ...__VLS_functionalComponentArgsRest(__VLS_208));
         const { default: __VLS_212 } = __VLS_210.slots;
         let __VLS_213;
@@ -1113,24 +1138,22 @@ else {
         NDataTable;
         // @ts-ignore
         const __VLS_214 = __VLS_asFunctionalComponent1(__VLS_213, new __VLS_213({
-            columns: (__VLS_ctx.userColumns),
-            data: (__VLS_ctx.users),
-            pagination: ({ pageSize: 12 }),
+            columns: (__VLS_ctx.jobColumns.slice(0, 6)),
+            data: (__VLS_ctx.summary?.recentJobs ?? []),
+            pagination: ({ pageSize: 8 }),
             bordered: (false),
-            remote: true,
         }));
         const __VLS_215 = __VLS_214({
-            columns: (__VLS_ctx.userColumns),
-            data: (__VLS_ctx.users),
-            pagination: ({ pageSize: 12 }),
+            columns: (__VLS_ctx.jobColumns.slice(0, 6)),
+            data: (__VLS_ctx.summary?.recentJobs ?? []),
+            pagination: ({ pageSize: 8 }),
             bordered: (false),
-            remote: true,
         }, ...__VLS_functionalComponentArgsRest(__VLS_214));
         // @ts-ignore
-        [currentView, userColumns, users,];
+        [summary, jobColumns,];
         var __VLS_210;
     }
-    if (__VLS_ctx.currentView === 'jobs') {
+    if (__VLS_ctx.currentView === 'users') {
         __VLS_asFunctionalElement1(__VLS_intrinsics.section, __VLS_intrinsics.section)({
             ...{ class: "view-stack" },
         });
@@ -1140,192 +1163,230 @@ else {
         NCard;
         // @ts-ignore
         const __VLS_219 = __VLS_asFunctionalComponent1(__VLS_218, new __VLS_218({
-            title: "生成记录",
+            title: "用户管理",
         }));
         const __VLS_220 = __VLS_219({
-            title: "生成记录",
+            title: "用户管理",
         }, ...__VLS_functionalComponentArgsRest(__VLS_219));
         const { default: __VLS_223 } = __VLS_221.slots;
+        let __VLS_224;
+        /** @ts-ignore @type { | typeof __VLS_components.NDataTable} */
+        NDataTable;
+        // @ts-ignore
+        const __VLS_225 = __VLS_asFunctionalComponent1(__VLS_224, new __VLS_224({
+            columns: (__VLS_ctx.userColumns),
+            data: (__VLS_ctx.users),
+            pagination: ({ pageSize: 12 }),
+            bordered: (false),
+            remote: true,
+        }));
+        const __VLS_226 = __VLS_225({
+            columns: (__VLS_ctx.userColumns),
+            data: (__VLS_ctx.users),
+            pagination: ({ pageSize: 12 }),
+            bordered: (false),
+            remote: true,
+        }, ...__VLS_functionalComponentArgsRest(__VLS_225));
+        // @ts-ignore
+        [currentView, userColumns, users,];
+        var __VLS_221;
+    }
+    if (__VLS_ctx.currentView === 'jobs') {
+        __VLS_asFunctionalElement1(__VLS_intrinsics.section, __VLS_intrinsics.section)({
+            ...{ class: "view-stack" },
+        });
+        /** @type {__VLS_StyleScopedClasses['view-stack']} */ ;
+        let __VLS_229;
+        /** @ts-ignore @type { | typeof __VLS_components.NCard | typeof __VLS_components.NCard} */
+        NCard;
+        // @ts-ignore
+        const __VLS_230 = __VLS_asFunctionalComponent1(__VLS_229, new __VLS_229({
+            title: "生成记录",
+        }));
+        const __VLS_231 = __VLS_230({
+            title: "生成记录",
+        }, ...__VLS_functionalComponentArgsRest(__VLS_230));
+        const { default: __VLS_234 } = __VLS_232.slots;
         __VLS_asFunctionalElement1(__VLS_intrinsics.div, __VLS_intrinsics.div)({
             ...{ class: "toolbar" },
         });
         /** @type {__VLS_StyleScopedClasses['toolbar']} */ ;
-        let __VLS_224;
+        let __VLS_235;
         /** @ts-ignore @type { | typeof __VLS_components.NInput} */
         NInput;
         // @ts-ignore
-        const __VLS_225 = __VLS_asFunctionalComponent1(__VLS_224, new __VLS_224({
+        const __VLS_236 = __VLS_asFunctionalComponent1(__VLS_235, new __VLS_235({
             value: (__VLS_ctx.jobFilters.search),
             placeholder: "搜索 prompt / 用户 ID",
             clearable: true,
         }));
-        const __VLS_226 = __VLS_225({
+        const __VLS_237 = __VLS_236({
             value: (__VLS_ctx.jobFilters.search),
             placeholder: "搜索 prompt / 用户 ID",
             clearable: true,
-        }, ...__VLS_functionalComponentArgsRest(__VLS_225));
-        let __VLS_229;
+        }, ...__VLS_functionalComponentArgsRest(__VLS_236));
+        let __VLS_240;
         /** @ts-ignore @type { | typeof __VLS_components.NSelect} */
         NSelect;
         // @ts-ignore
-        const __VLS_230 = __VLS_asFunctionalComponent1(__VLS_229, new __VLS_229({
+        const __VLS_241 = __VLS_asFunctionalComponent1(__VLS_240, new __VLS_240({
             value: (__VLS_ctx.jobFilters.kind),
             options: (__VLS_ctx.jobKindOptions),
             ...{ class: "filter-select" },
         }));
-        const __VLS_231 = __VLS_230({
+        const __VLS_242 = __VLS_241({
             value: (__VLS_ctx.jobFilters.kind),
             options: (__VLS_ctx.jobKindOptions),
             ...{ class: "filter-select" },
-        }, ...__VLS_functionalComponentArgsRest(__VLS_230));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_241));
         /** @type {__VLS_StyleScopedClasses['filter-select']} */ ;
-        let __VLS_234;
+        let __VLS_245;
         /** @ts-ignore @type { | typeof __VLS_components.NSelect} */
         NSelect;
         // @ts-ignore
-        const __VLS_235 = __VLS_asFunctionalComponent1(__VLS_234, new __VLS_234({
+        const __VLS_246 = __VLS_asFunctionalComponent1(__VLS_245, new __VLS_245({
             value: (__VLS_ctx.jobFilters.status),
             options: (__VLS_ctx.jobStatusOptions),
             ...{ class: "filter-select" },
         }));
-        const __VLS_236 = __VLS_235({
+        const __VLS_247 = __VLS_246({
             value: (__VLS_ctx.jobFilters.status),
             options: (__VLS_ctx.jobStatusOptions),
             ...{ class: "filter-select" },
-        }, ...__VLS_functionalComponentArgsRest(__VLS_235));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_246));
         /** @type {__VLS_StyleScopedClasses['filter-select']} */ ;
-        let __VLS_239;
+        let __VLS_250;
         /** @ts-ignore @type { | typeof __VLS_components.NCheckbox | typeof __VLS_components.NCheckbox} */
         NCheckbox;
         // @ts-ignore
-        const __VLS_240 = __VLS_asFunctionalComponent1(__VLS_239, new __VLS_239({
+        const __VLS_251 = __VLS_asFunctionalComponent1(__VLS_250, new __VLS_250({
             checked: (__VLS_ctx.jobFilters.includeDeleted),
         }));
-        const __VLS_241 = __VLS_240({
+        const __VLS_252 = __VLS_251({
             checked: (__VLS_ctx.jobFilters.includeDeleted),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_240));
-        const { default: __VLS_244 } = __VLS_242.slots;
+        }, ...__VLS_functionalComponentArgsRest(__VLS_251));
+        const { default: __VLS_255 } = __VLS_253.slots;
         // @ts-ignore
         [currentView, jobFilters, jobFilters, jobFilters, jobFilters, jobKindOptions, jobStatusOptions,];
-        var __VLS_242;
-        let __VLS_245;
+        var __VLS_253;
+        let __VLS_256;
         /** @ts-ignore @type { | typeof __VLS_components.NButton | typeof __VLS_components.NButton} */
         NButton;
         // @ts-ignore
-        const __VLS_246 = __VLS_asFunctionalComponent1(__VLS_245, new __VLS_245({
+        const __VLS_257 = __VLS_asFunctionalComponent1(__VLS_256, new __VLS_256({
             ...{ 'onClick': {} },
             type: "primary",
             secondary: true,
         }));
-        const __VLS_247 = __VLS_246({
+        const __VLS_258 = __VLS_257({
             ...{ 'onClick': {} },
             type: "primary",
             secondary: true,
-        }, ...__VLS_functionalComponentArgsRest(__VLS_246));
-        let __VLS_250;
-        const __VLS_251 = ({ click: {} },
+        }, ...__VLS_functionalComponentArgsRest(__VLS_257));
+        let __VLS_261;
+        const __VLS_262 = ({ click: {} },
             { onClick: (__VLS_ctx.loadJobs) });
-        const { default: __VLS_252 } = __VLS_248.slots;
+        const { default: __VLS_263 } = __VLS_259.slots;
         // @ts-ignore
         [loadJobs,];
-        var __VLS_248;
-        var __VLS_249;
-        let __VLS_253;
+        var __VLS_259;
+        var __VLS_260;
+        let __VLS_264;
         /** @ts-ignore @type { | typeof __VLS_components.NDataTable} */
         NDataTable;
         // @ts-ignore
-        const __VLS_254 = __VLS_asFunctionalComponent1(__VLS_253, new __VLS_253({
+        const __VLS_265 = __VLS_asFunctionalComponent1(__VLS_264, new __VLS_264({
             columns: (__VLS_ctx.jobColumns),
             data: (__VLS_ctx.jobs),
             pagination: ({ pageSize: 12 }),
             bordered: (false),
             remote: true,
         }));
-        const __VLS_255 = __VLS_254({
+        const __VLS_266 = __VLS_265({
             columns: (__VLS_ctx.jobColumns),
             data: (__VLS_ctx.jobs),
             pagination: ({ pageSize: 12 }),
             bordered: (false),
             remote: true,
-        }, ...__VLS_functionalComponentArgsRest(__VLS_254));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_265));
         // @ts-ignore
         [jobColumns, jobs,];
-        var __VLS_221;
+        var __VLS_232;
     }
     if (__VLS_ctx.currentView === 'settings') {
         __VLS_asFunctionalElement1(__VLS_intrinsics.section, __VLS_intrinsics.section)({
             ...{ class: "view-stack" },
         });
         /** @type {__VLS_StyleScopedClasses['view-stack']} */ ;
-        let __VLS_258;
+        let __VLS_269;
         /** @ts-ignore @type { | typeof __VLS_components.NCard | typeof __VLS_components.NCard} */
         NCard;
         // @ts-ignore
-        const __VLS_259 = __VLS_asFunctionalComponent1(__VLS_258, new __VLS_258({
+        const __VLS_270 = __VLS_asFunctionalComponent1(__VLS_269, new __VLS_269({
             title: "系统配置",
         }));
-        const __VLS_260 = __VLS_259({
+        const __VLS_271 = __VLS_270({
             title: "系统配置",
-        }, ...__VLS_functionalComponentArgsRest(__VLS_259));
-        const { default: __VLS_263 } = __VLS_261.slots;
+        }, ...__VLS_functionalComponentArgsRest(__VLS_270));
+        const { default: __VLS_274 } = __VLS_272.slots;
         __VLS_asFunctionalElement1(__VLS_intrinsics.div, __VLS_intrinsics.div)({
             ...{ class: "settings-grid" },
         });
         /** @type {__VLS_StyleScopedClasses['settings-grid']} */ ;
         for (const [item] of __VLS_vFor((__VLS_ctx.editableSettings))) {
-            let __VLS_264;
+            let __VLS_275;
             /** @ts-ignore @type { | typeof __VLS_components.NFormItem | typeof __VLS_components.NFormItem} */
             NFormItem;
             // @ts-ignore
-            const __VLS_265 = __VLS_asFunctionalComponent1(__VLS_264, new __VLS_264({
+            const __VLS_276 = __VLS_asFunctionalComponent1(__VLS_275, new __VLS_275({
                 key: (item.key),
                 label: (item.label),
             }));
-            const __VLS_266 = __VLS_265({
+            const __VLS_277 = __VLS_276({
                 key: (item.key),
                 label: (item.label),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_265));
-            const { default: __VLS_269 } = __VLS_267.slots;
+            }, ...__VLS_functionalComponentArgsRest(__VLS_276));
+            const { default: __VLS_280 } = __VLS_278.slots;
             if (item.secret) {
-                let __VLS_270;
+                let __VLS_281;
                 /** @ts-ignore @type { | typeof __VLS_components.NInputGroup | typeof __VLS_components.NInputGroup} */
                 NInputGroup;
                 // @ts-ignore
-                const __VLS_271 = __VLS_asFunctionalComponent1(__VLS_270, new __VLS_270({}));
-                const __VLS_272 = __VLS_271({}, ...__VLS_functionalComponentArgsRest(__VLS_271));
-                const { default: __VLS_275 } = __VLS_273.slots;
-                let __VLS_276;
+                const __VLS_282 = __VLS_asFunctionalComponent1(__VLS_281, new __VLS_281({}));
+                const __VLS_283 = __VLS_282({}, ...__VLS_functionalComponentArgsRest(__VLS_282));
+                const { default: __VLS_286 } = __VLS_284.slots;
+                let __VLS_287;
                 /** @ts-ignore @type { | typeof __VLS_components.NInput} */
                 NInput;
                 // @ts-ignore
-                const __VLS_277 = __VLS_asFunctionalComponent1(__VLS_276, new __VLS_276({
+                const __VLS_288 = __VLS_asFunctionalComponent1(__VLS_287, new __VLS_287({
                     value: (__VLS_ctx.formValues[item.key]),
                     type: (__VLS_ctx.visibleSecrets[item.key] ? 'text' : 'password'),
                     placeholder: (item.placeholder),
                     showPasswordOn: "click",
                 }));
-                const __VLS_278 = __VLS_277({
+                const __VLS_289 = __VLS_288({
                     value: (__VLS_ctx.formValues[item.key]),
                     type: (__VLS_ctx.visibleSecrets[item.key] ? 'text' : 'password'),
                     placeholder: (item.placeholder),
                     showPasswordOn: "click",
-                }, ...__VLS_functionalComponentArgsRest(__VLS_277));
-                let __VLS_281;
+                }, ...__VLS_functionalComponentArgsRest(__VLS_288));
+                let __VLS_292;
                 /** @ts-ignore @type { | typeof __VLS_components.NButton | typeof __VLS_components.NButton} */
                 NButton;
                 // @ts-ignore
-                const __VLS_282 = __VLS_asFunctionalComponent1(__VLS_281, new __VLS_281({
+                const __VLS_293 = __VLS_asFunctionalComponent1(__VLS_292, new __VLS_292({
                     ...{ 'onClick': {} },
                     secondary: true,
                     ...{ class: "eye-button" },
                 }));
-                const __VLS_283 = __VLS_282({
+                const __VLS_294 = __VLS_293({
                     ...{ 'onClick': {} },
                     secondary: true,
                     ...{ class: "eye-button" },
-                }, ...__VLS_functionalComponentArgsRest(__VLS_282));
-                let __VLS_286;
-                const __VLS_287 = ({ click: {} },
+                }, ...__VLS_functionalComponentArgsRest(__VLS_293));
+                let __VLS_297;
+                const __VLS_298 = ({ click: {} },
                     { onClick: (...[$event]) => {
                             if (!!(__VLS_ctx.authLoading))
                                 return;
@@ -1340,38 +1401,38 @@ else {
                             [currentView, editableSettings, formValues, visibleSecrets, visibleSecrets, visibleSecrets,];
                         } });
                 /** @type {__VLS_StyleScopedClasses['eye-button']} */ ;
-                const { default: __VLS_288 } = __VLS_284.slots;
-                let __VLS_289;
+                const { default: __VLS_299 } = __VLS_295.slots;
+                let __VLS_300;
                 /** @ts-ignore @type { | typeof __VLS_components.NIcon} */
                 NIcon;
                 // @ts-ignore
-                const __VLS_290 = __VLS_asFunctionalComponent1(__VLS_289, new __VLS_289({
+                const __VLS_301 = __VLS_asFunctionalComponent1(__VLS_300, new __VLS_300({
                     component: (__VLS_ctx.visibleSecrets[item.key] ? __VLS_ctx.EyeOffOutline : __VLS_ctx.EyeOutline),
                 }));
-                const __VLS_291 = __VLS_290({
+                const __VLS_302 = __VLS_301({
                     component: (__VLS_ctx.visibleSecrets[item.key] ? __VLS_ctx.EyeOffOutline : __VLS_ctx.EyeOutline),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_290));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_301));
                 // @ts-ignore
                 [visibleSecrets, EyeOffOutline, EyeOutline,];
-                var __VLS_284;
-                var __VLS_285;
+                var __VLS_295;
+                var __VLS_296;
                 // @ts-ignore
                 [];
-                var __VLS_273;
+                var __VLS_284;
             }
             else {
-                let __VLS_294;
+                let __VLS_305;
                 /** @ts-ignore @type { | typeof __VLS_components.NInput} */
                 NInput;
                 // @ts-ignore
-                const __VLS_295 = __VLS_asFunctionalComponent1(__VLS_294, new __VLS_294({
+                const __VLS_306 = __VLS_asFunctionalComponent1(__VLS_305, new __VLS_305({
                     value: (__VLS_ctx.formValues[item.key]),
                     placeholder: (item.placeholder),
                 }));
-                const __VLS_296 = __VLS_295({
+                const __VLS_307 = __VLS_306({
                     value: (__VLS_ctx.formValues[item.key]),
                     placeholder: (item.placeholder),
-                }, ...__VLS_functionalComponentArgsRest(__VLS_295));
+                }, ...__VLS_functionalComponentArgsRest(__VLS_306));
             }
             __VLS_asFunctionalElement1(__VLS_intrinsics.span, __VLS_intrinsics.span)({
                 ...{ class: "setting-meta" },
@@ -1382,7 +1443,7 @@ else {
                 : "未配置");
             // @ts-ignore
             [formatDate, formValues, settingsByKey, settingsByKey,];
-            var __VLS_267;
+            var __VLS_278;
             // @ts-ignore
             [];
         }
@@ -1390,84 +1451,84 @@ else {
             ...{ class: "settings-actions" },
         });
         /** @type {__VLS_StyleScopedClasses['settings-actions']} */ ;
-        let __VLS_299;
+        let __VLS_310;
         /** @ts-ignore @type { | typeof __VLS_components.NButton | typeof __VLS_components.NButton} */
         NButton;
         // @ts-ignore
-        const __VLS_300 = __VLS_asFunctionalComponent1(__VLS_299, new __VLS_299({
+        const __VLS_311 = __VLS_asFunctionalComponent1(__VLS_310, new __VLS_310({
             ...{ 'onClick': {} },
             type: "primary",
             loading: (__VLS_ctx.saving),
         }));
-        const __VLS_301 = __VLS_300({
+        const __VLS_312 = __VLS_311({
             ...{ 'onClick': {} },
             type: "primary",
             loading: (__VLS_ctx.saving),
-        }, ...__VLS_functionalComponentArgsRest(__VLS_300));
-        let __VLS_304;
-        const __VLS_305 = ({ click: {} },
+        }, ...__VLS_functionalComponentArgsRest(__VLS_311));
+        let __VLS_315;
+        const __VLS_316 = ({ click: {} },
             { onClick: (__VLS_ctx.saveSettings) });
-        const { default: __VLS_306 } = __VLS_302.slots;
+        const { default: __VLS_317 } = __VLS_313.slots;
         {
-            const { icon: __VLS_307 } = __VLS_302.slots;
-            let __VLS_308;
+            const { icon: __VLS_318 } = __VLS_313.slots;
+            let __VLS_319;
             /** @ts-ignore @type { | typeof __VLS_components.NIcon} */
             NIcon;
             // @ts-ignore
-            const __VLS_309 = __VLS_asFunctionalComponent1(__VLS_308, new __VLS_308({
+            const __VLS_320 = __VLS_asFunctionalComponent1(__VLS_319, new __VLS_319({
                 component: (__VLS_ctx.KeyOutline),
             }));
-            const __VLS_310 = __VLS_309({
+            const __VLS_321 = __VLS_320({
                 component: (__VLS_ctx.KeyOutline),
-            }, ...__VLS_functionalComponentArgsRest(__VLS_309));
+            }, ...__VLS_functionalComponentArgsRest(__VLS_320));
             // @ts-ignore
             [saving, saveSettings, KeyOutline,];
         }
         // @ts-ignore
         [];
-        var __VLS_302;
-        var __VLS_303;
+        var __VLS_313;
+        var __VLS_314;
         // @ts-ignore
         [];
-        var __VLS_261;
+        var __VLS_272;
     }
     if (__VLS_ctx.currentView === 'audit') {
         __VLS_asFunctionalElement1(__VLS_intrinsics.section, __VLS_intrinsics.section)({
             ...{ class: "view-stack" },
         });
         /** @type {__VLS_StyleScopedClasses['view-stack']} */ ;
-        let __VLS_313;
+        let __VLS_324;
         /** @ts-ignore @type { | typeof __VLS_components.NCard | typeof __VLS_components.NCard} */
         NCard;
         // @ts-ignore
-        const __VLS_314 = __VLS_asFunctionalComponent1(__VLS_313, new __VLS_313({
+        const __VLS_325 = __VLS_asFunctionalComponent1(__VLS_324, new __VLS_324({
             title: "审计日志",
         }));
-        const __VLS_315 = __VLS_314({
+        const __VLS_326 = __VLS_325({
             title: "审计日志",
-        }, ...__VLS_functionalComponentArgsRest(__VLS_314));
-        const { default: __VLS_318 } = __VLS_316.slots;
-        let __VLS_319;
+        }, ...__VLS_functionalComponentArgsRest(__VLS_325));
+        const { default: __VLS_329 } = __VLS_327.slots;
+        let __VLS_330;
         /** @ts-ignore @type { | typeof __VLS_components.NDataTable} */
         NDataTable;
         // @ts-ignore
-        const __VLS_320 = __VLS_asFunctionalComponent1(__VLS_319, new __VLS_319({
+        const __VLS_331 = __VLS_asFunctionalComponent1(__VLS_330, new __VLS_330({
             columns: (__VLS_ctx.auditColumns),
             data: (__VLS_ctx.auditLogs),
             pagination: ({ pageSize: 14 }),
             bordered: (false),
             remote: true,
         }));
-        const __VLS_321 = __VLS_320({
+        const __VLS_332 = __VLS_331({
             columns: (__VLS_ctx.auditColumns),
             data: (__VLS_ctx.auditLogs),
             pagination: ({ pageSize: 14 }),
             bordered: (false),
             remote: true,
-        }, ...__VLS_functionalComponentArgsRest(__VLS_320));
+        }, ...__VLS_functionalComponentArgsRest(__VLS_331));
         // @ts-ignore
         [currentView, auditColumns, auditLogs,];
-        var __VLS_316;
+        var __VLS_327;
     }
     // @ts-ignore
     [];
@@ -1479,11 +1540,11 @@ else {
     [];
     var __VLS_62;
 }
-let __VLS_324;
+let __VLS_335;
 /** @ts-ignore @type { | typeof __VLS_components.NModal | typeof __VLS_components.NModal} */
 NModal;
 // @ts-ignore
-const __VLS_325 = __VLS_asFunctionalComponent1(__VLS_324, new __VLS_324({
+const __VLS_336 = __VLS_asFunctionalComponent1(__VLS_335, new __VLS_335({
     ...{ 'onPositiveClick': {} },
     show: (__VLS_ctx.confirmState.show),
     preset: "dialog",
@@ -1492,7 +1553,7 @@ const __VLS_325 = __VLS_asFunctionalComponent1(__VLS_324, new __VLS_324({
     positiveText: (__VLS_ctx.confirmState.confirmText),
     negativeText: "取消",
 }));
-const __VLS_326 = __VLS_325({
+const __VLS_337 = __VLS_336({
     ...{ 'onPositiveClick': {} },
     show: (__VLS_ctx.confirmState.show),
     preset: "dialog",
@@ -1500,31 +1561,31 @@ const __VLS_326 = __VLS_325({
     title: (__VLS_ctx.confirmState.title),
     positiveText: (__VLS_ctx.confirmState.confirmText),
     negativeText: "取消",
-}, ...__VLS_functionalComponentArgsRest(__VLS_325));
-let __VLS_329;
-const __VLS_330 = ({ positiveClick: {} },
+}, ...__VLS_functionalComponentArgsRest(__VLS_336));
+let __VLS_340;
+const __VLS_341 = ({ positiveClick: {} },
     { onPositiveClick: (__VLS_ctx.runConfirmed) });
-const { default: __VLS_331 } = __VLS_327.slots;
+const { default: __VLS_342 } = __VLS_338.slots;
 {
-    const { icon: __VLS_332 } = __VLS_327.slots;
-    let __VLS_333;
+    const { icon: __VLS_343 } = __VLS_338.slots;
+    let __VLS_344;
     /** @ts-ignore @type { | typeof __VLS_components.NIcon} */
     NIcon;
     // @ts-ignore
-    const __VLS_334 = __VLS_asFunctionalComponent1(__VLS_333, new __VLS_333({
+    const __VLS_345 = __VLS_asFunctionalComponent1(__VLS_344, new __VLS_344({
         component: (__VLS_ctx.TrashOutline),
     }));
-    const __VLS_335 = __VLS_334({
+    const __VLS_346 = __VLS_345({
         component: (__VLS_ctx.TrashOutline),
-    }, ...__VLS_functionalComponentArgsRest(__VLS_334));
+    }, ...__VLS_functionalComponentArgsRest(__VLS_345));
     // @ts-ignore
     [confirmState, confirmState, confirmState, runConfirmed, TrashOutline,];
 }
 (__VLS_ctx.confirmState.content);
 // @ts-ignore
 [confirmState,];
-var __VLS_327;
-var __VLS_328;
+var __VLS_338;
+var __VLS_339;
 // @ts-ignore
 [];
 var __VLS_3;

@@ -1,6 +1,17 @@
 "use client";
 
-import { AlertCircle, ArrowLeft, ArrowRight, CheckCircle2, Download, Home, Loader2, Menu, RotateCw, X } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowLeft,
+  ArrowRight,
+  CheckCircle2,
+  Download,
+  Home,
+  Loader2,
+  Menu,
+  RotateCw,
+  X,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { MenuContainer, MenuItem } from "@/components/ui/fluid-menu";
 
@@ -91,7 +102,7 @@ function updateStatusText(status: UpdateStatus) {
     case "available":
       return `发现新版本 ${status.updateInfo?.version ?? ""}`;
     case "not-available":
-      return "当前已是最新版本。";
+      return "当前已经是最新版本。";
     case "downloading":
       return `正在下载 ${status.percent ?? 0}%`;
     case "downloaded":
@@ -112,13 +123,16 @@ function releaseNotesList(notes: UpdateInfo["releaseNotes"]) {
     return notes.filter(Boolean);
   }
   if (typeof notes === "string" && notes.trim()) {
-    return notes.split(/\r?\n/).map((item) => item.replace(/^[-*]\s*/, "").trim()).filter(Boolean);
+    return notes
+      .split(/\r?\n/)
+      .map((item) => item.replace(/^[-*]\s*/, "").trim())
+      .filter(Boolean);
   }
   return [];
 }
 
 export function DesktopNavigationBar() {
-  const [isDesktopApp, setIsDesktopApp] = useState(detectDesktopApp);
+  const [isDesktopApp, setIsDesktopApp] = useState(false);
   const [state, setState] = useState(initialState);
   const [updateStatus, setUpdateStatus] = useState(initialUpdateStatus);
   const [isUpdatePanelOpen, setIsUpdatePanelOpen] = useState(false);
@@ -191,7 +205,10 @@ export function DesktopNavigationBar() {
     }
   };
 
-  const isBusy = updateStatus.status === "checking" || updateStatus.status === "downloading" || updateStatus.status === "installing";
+  const isBusy =
+    updateStatus.status === "checking" ||
+    updateStatus.status === "downloading" ||
+    updateStatus.status === "installing";
   const notes = releaseNotesList(updateStatus.updateInfo?.releaseNotes);
 
   return (
@@ -201,7 +218,9 @@ export function DesktopNavigationBar() {
           <div className="mb-3 flex items-start justify-between gap-3">
             <div>
               <p className="text-sm font-semibold">软件更新</p>
-              <p className="mt-1 text-xs text-slate-500">当前版本 {updateStatus.currentVersion || "未知"}</p>
+              <p className="mt-1 text-xs text-slate-500">
+                当前版本 {updateStatus.currentVersion || "未知"}
+              </p>
             </div>
             <button
               className="flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950"
@@ -226,7 +245,9 @@ export function DesktopNavigationBar() {
             <div>
               <p className="font-medium">{updateStatusText(updateStatus)}</p>
               {updateStatus.updateInfo?.version && updateStatus.status !== "not-available" && (
-                <p className="mt-1 text-xs text-slate-500">新版本 {updateStatus.updateInfo.version}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  新版本 {updateStatus.updateInfo.version}
+                </p>
               )}
             </div>
           </div>

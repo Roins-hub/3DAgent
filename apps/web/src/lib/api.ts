@@ -11,6 +11,13 @@ import { getAuthHeaders } from "@/lib/supabase";
 export const API_BASE_URL = normalizeApiBaseUrl(process.env.NEXT_PUBLIC_API_BASE_URL);
 let activeApiBaseUrl = API_BASE_URL;
 
+export function createClientRequestId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 function browserHostname() {
   return typeof window === "undefined" ? undefined : window.location.hostname;
 }
@@ -162,6 +169,7 @@ export interface CadamGenerateResponse {
 export interface ParamcadRunRequest {
   requirement: string;
   runFea?: boolean;
+  clientRequestId?: string;
 }
 
 export interface ParamcadRunResponse {
@@ -178,6 +186,7 @@ export interface ParamcadRunResponse {
   feaPassed: boolean | null;
   stepFile: string | null;
   stepDownloadUrl: string | null;
+  sourceFile: string | null;
   parameters: Record<string, number>;
   provider: string;
   model: string;

@@ -79,6 +79,42 @@ const editableSettings = [
     placeholder: "mimo / openai",
   },
   {
+    key: "PARAMCAD_ENGINE",
+    label: "工程 CAD 引擎",
+    secret: false,
+    placeholder: "cad-script",
+  },
+  {
+    key: "CAD_SCRIPT_GENERATOR",
+    label: "CAD Script Generator",
+    secret: false,
+    placeholder: "local / llm",
+  },
+  {
+    key: "CAD_SCRIPT_BASE_URL",
+    label: "CAD Script Base URL",
+    secret: false,
+    placeholder: "https://api.deepseek.com",
+  },
+  {
+    key: "CAD_SCRIPT_MODEL",
+    label: "CAD Script Model",
+    secret: false,
+    placeholder: "deepseek-v4-pro",
+  },
+  {
+    key: "CAD_SCRIPT_REPAIR",
+    label: "CAD Script Repair",
+    secret: false,
+    placeholder: "true / false",
+  },
+  {
+    key: "CAD_SCRIPT_API_KEY",
+    label: "CAD Script API Key",
+    secret: true,
+    placeholder: "not configured",
+  },
+  {
     key: "OPENAI_IMAGE_MODEL",
     label: "OpenAI 图片模型",
     secret: false,
@@ -194,6 +230,7 @@ const jobKindOptions = [
   { label: "三维", value: "3d" },
   { label: "图片", value: "image" },
   { label: "CADAM", value: "cadam" },
+  { label: "工程 CAD", value: "paramcad" },
 ];
 
 const jobStatusOptions = [
@@ -209,6 +246,7 @@ const jobKindLabel = (kind: AdminGenerationJob["kind"]) => {
   if (kind === "3d") return "三维";
   if (kind === "image") return "图片";
   if (kind === "cadam") return "CADAM";
+  if (kind === "paramcad") return "工程 CAD";
   return kind;
 };
 
@@ -719,6 +757,9 @@ onMounted(async () => {
                 </NCard>
                 <NCard>
                   <NStatistic label="失败任务" :value="summary?.failedJobs ?? 0" />
+                </NCard>
+                <NCard>
+                  <NStatistic label="工程 CAD" :value="summary?.paramcadJobs ?? 0" />
                 </NCard>
               </div>
               <NCard title="最近失败任务">

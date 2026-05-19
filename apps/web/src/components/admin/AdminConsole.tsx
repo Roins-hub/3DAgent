@@ -41,7 +41,6 @@ const editableSettings = [
   { key: "MODEL_PROVIDER", label: "三维供应商", secret: false, placeholder: "mock / hunyuan / meshy / neural4d" },
   { key: "IMAGE_PROVIDER", label: "图片供应商", secret: false, placeholder: "mock / siliconflow / openai" },
   { key: "CADAM_LLM_PROVIDER", label: "CADAM 模型通道", secret: false, placeholder: "mimo / openai" },
-  { key: "AI_PARAMCAD_BASE_URL", label: "AI-ParamCAD 引擎地址", secret: false, placeholder: "http://localhost:8088" },
   { key: "OPENAI_IMAGE_MODEL", label: "OpenAI 图片模型", secret: false, placeholder: "gpt-image-2" },
   { key: "SILICONFLOW_IMAGE_MODEL", label: "SiliconFlow 图片模型", secret: false, placeholder: "Kwai-Kolors/Kolors" },
   { key: "MIMO_CHAT_MODEL", label: "MIMO 对话模型", secret: false, placeholder: "mimo-v2.5-pro" },

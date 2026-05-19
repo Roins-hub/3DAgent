@@ -256,6 +256,315 @@ class CadamGenerationTests(unittest.TestCase):
         self.assertEqual(row["metadata"]["model"], "gpt-4o-mini")
         self.assertEqual(row["metadata"]["scad"], generated.scad)
 
+    def test_cadam_generate_deduplicates_same_client_request_id(self):
+        with test_env():
+            api = load_api()
+            request = api.CadamGenerateRequest(
+                prompt="make a motor bracket",
+                parameters={"width": 96},
+                clientRequestId="cadam-request-1",
+            )
+            generated = api.CadamGenerateResponse(
+                name="motor_bracket",
+                description="bracket",
+                parameters={"width": 96},
+                scad="module motor_bracket(){cube([96,20,8]);} motor_bracket();",
+                provider="mimo",
+                model="mimo-v2.5-pro",
+            )
+
+            async def run_endpoint_twice():
+                first = await api.cadam_generate(request, "Bearer token")
+                second = await api.cadam_generate(request, "Bearer token")
+                return first, second
+
+            with (
+                patch.object(api, "verify_supabase_user", return_value=api.AuthUser(id="user-1", email="u@example.com")),
+                patch.object(api, "generate_cadam_response", return_value=generated) as generate,
+                patch.object(api, "insert_history_row") as insert_history,
+            ):
+                import asyncio
+
+                first, second = asyncio.run(run_endpoint_twice())
+
+        self.assertEqual(first.name, "motor_bracket")
+        self.assertEqual(second.name, "motor_bracket")
+        generate.assert_called_once()
+        insert_history.assert_called_once()
+
+    def test_paramcad_run_persists_authenticated_result_to_history(self):
+        with test_env():
+            api = load_api()
+            request = api.ParamcadRunRequest(
+                requirement="design a spindle shaft",
+                runFea=True,
+            )
+            generated = api.ParamcadRunResponse(
+                success=True,
+                title="spindle shaft",
+                domain="rotating machinery",
+                material="42CrMo",
+                geometryType="stepped_shaft",
+                score=92.0,
+                iterations=10,
+                safetyFactor=2.4,
+                maxStress=165.0,
+                feaPassed=True,
+                stepFile="spindle.step",
+                stepDownloadUrl="/api/paramcad/outputs/spindle.step",
+                parameters={"length": 240.0, "diameter": 36.0},
+            )
+
+            async def run_endpoint():
+                return await api.paramcad_run(request, "Bearer token")
+
+            with (
+                patch.object(api, "verify_supabase_user", return_value=api.AuthUser(id="user-1", email="u@example.com")),
+                patch.object(api, "run_paramcad_engine", return_value=generated),
+                patch.object(api, "insert_history_row") as insert_history,
+            ):
+                import asyncio
+
+                result = asyncio.run(run_endpoint())
+
+        self.assertEqual(result.title, "spindle shaft")
+        insert_history.assert_called_once()
+        row, authorization = insert_history.call_args.args
+        self.assertEqual(authorization, "Bearer token")
+        self.assertEqual(row["user_id"], "user-1")
+        self.assertEqual(row["kind"], "paramcad")
+        self.assertEqual(row["status"], "completed")
+        self.assertEqual(row["target_format"], "step")
+        self.assertEqual(row["result_url"], "/api/paramcad/outputs/spindle.step")
+        self.assertEqual(row["metadata"]["runFea"], True)
+        self.assertEqual(row["metadata"]["provider"], "cad-script-engine")
+
+    def test_paramcad_run_deduplicates_same_client_request_id(self):
+        with test_env():
+            api = load_api()
+            request = api.ParamcadRunRequest(
+                requirement="design a spindle shaft",
+                runFea=True,
+                clientRequestId="client-request-1",
+            )
+            generated = api.ParamcadRunResponse(
+                success=True,
+                title="spindle shaft",
+                geometryType="stepped_shaft",
+                stepFile="spindle.step",
+                stepDownloadUrl="/api/paramcad/outputs/spindle.step",
+                parameters={"length": 240.0, "diameter": 36.0},
+            )
+
+            async def run_endpoint_twice():
+                first = await api.paramcad_run(request, "Bearer token")
+                second = await api.paramcad_run(request, "Bearer token")
+                return first, second
+
+            with (
+                patch.object(api, "verify_supabase_user", return_value=api.AuthUser(id="user-1", email="u@example.com")),
+                patch.object(api, "run_paramcad_engine", return_value=generated) as run_engine,
+                patch.object(api, "insert_history_row") as insert_history,
+            ):
+                import asyncio
+
+                first, second = asyncio.run(run_endpoint_twice())
+
+        self.assertEqual(first.stepFile, "spindle.step")
+        self.assertEqual(second.stepFile, "spindle.step")
+        run_engine.assert_called_once()
+        insert_history.assert_called_once()
+
+    def test_paramcad_defaults_to_cad_script_engine(self):
+        with test_env():
+            api = load_api()
+
+        self.assertEqual(api.paramcad_engine(), "cad-script")
+
+    def test_paramcad_default_output_dir_avoids_api_reload_watcher(self):
+        with test_env():
+            api = load_api()
+
+        output_dir = api.cad_script_output_dir()
+        self.assertNotIn(api.API_DIR, output_dir.parents)
+
+    def test_paramcad_can_run_cad_script_engine(self):
+        with test_env(
+            {
+                "PARAMCAD_ENGINE": "cad-script",
+                "CAD_SCRIPT_GENERATOR": "llm",
+                "CAD_SCRIPT_API_KEY": "test-cad-script-key",
+                "CAD_SCRIPT_BASE_URL": "https://deepseek.example",
+                "CAD_SCRIPT_MODEL": "deepseek-v4-pro",
+            }
+        ):
+            api = load_api()
+            request = api.ParamcadRunRequest(
+                requirement="generate an 80mm circular flange with 6 bolt holes",
+                runFea=False,
+            )
+            cli_payload = {
+                "success": True,
+                "title": "Circular Flange",
+                "geometryType": "flange",
+                "parameters": {
+                    "outerDiameter": 80.0,
+                    "thickness": 10.0,
+                    "holeCount": 6.0,
+                },
+                "stepFile": "F:\\3DAgent\\apps\\api\\generated\\cad-script\\circular_flange.step",
+            }
+            completed = api.subprocess.CompletedProcess(
+                args=["python", "-m", "cad_script_engine.cli"],
+                returncode=0,
+                stdout=api.json.dumps(cli_payload),
+                stderr="",
+            )
+
+            with patch.object(api.subprocess, "run", return_value=completed) as run:
+                result = api.run_paramcad_engine(request)
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.provider, "cad-script-engine")
+        self.assertEqual(result.model, "build123d")
+        self.assertEqual(result.title, "Circular Flange")
+        self.assertEqual(result.geometryType, "flange")
+        self.assertEqual(result.stepFile, "circular_flange.step")
+        self.assertEqual(result.stepDownloadUrl, "/api/paramcad/outputs/circular_flange.step")
+        self.assertEqual(result.parameters["outerDiameter"], 80.0)
+        sent_args = run.call_args.args[0]
+        self.assertIn("-m", sent_args)
+        self.assertIn("cad_script_engine.cli", sent_args)
+        self.assertIn("--prompt", sent_args)
+        sent_env = run.call_args.kwargs["env"]
+        self.assertEqual(sent_env["CAD_SCRIPT_GENERATOR"], "llm")
+        self.assertEqual(sent_env["CAD_SCRIPT_API_KEY"], "test-cad-script-key")
+        self.assertEqual(sent_env["CAD_SCRIPT_BASE_URL"], "https://deepseek.example")
+        self.assertEqual(sent_env["CAD_SCRIPT_MODEL"], "deepseek-v4-pro")
+
+    def test_paramcad_preview_converts_step_to_stl_cache(self):
+        with test_env():
+            api = load_api()
+            output_dir = api.cad_script_output_dir()
+            step_path = output_dir / "bearing.step"
+            stl_path = output_dir / "bearing.stl"
+            step_path.parent.mkdir(parents=True, exist_ok=True)
+            step_path.write_text("ISO-10303-21;", encoding="utf-8")
+            if stl_path.exists():
+                stl_path.unlink()
+
+            with patch.object(api, "convert_step_to_stl_preview") as convert:
+                response = api.paramcad_preview_file_response("bearing.step", "stl")
+
+        self.assertEqual(response.media_type, "model/stl")
+        convert.assert_called_once_with(step_path.resolve(), stl_path)
+
+    def test_paramcad_preview_rejects_path_traversal(self):
+        with test_env():
+            api = load_api()
+
+        with self.assertRaises(api.HTTPException) as error:
+            api.paramcad_preview_file_response("../bearing.step", "stl")
+
+        self.assertEqual(error.exception.status_code, 404)
+
+    def test_paramcad_cad_script_engine_passes_runtime_settings_to_subprocess(self):
+        with test_env({"PARAMCAD_ENGINE": "cad-script"}):
+            api = load_api()
+            request = api.ParamcadRunRequest(requirement="make a custom mounting bracket")
+            completed = api.subprocess.CompletedProcess(
+                args=["python", "-m", "cad_script_engine.cli"],
+                returncode=0,
+                stdout=api.json.dumps(
+                    {
+                        "success": True,
+                        "title": "Custom Bracket",
+                        "geometryType": "bracket",
+                        "parameters": {"length": 80.0},
+                        "stepFile": "F:\\3DAgent\\apps\\api\\generated\\cad-script\\custom_bracket.step",
+                    }
+                ),
+                stderr="",
+            )
+
+            def runtime_value(key, default=""):
+                values = {
+                    "PARAMCAD_ENGINE": "cad-script",
+                    "CAD_SCRIPT_GENERATOR": "llm",
+                    "CAD_SCRIPT_API_KEY": "runtime-key",
+                    "CAD_SCRIPT_BASE_URL": "https://runtime.deepseek.example",
+                    "CAD_SCRIPT_MODEL": "deepseek-v4-pro",
+                    "CAD_SCRIPT_REPAIR": "true",
+                }
+                return values.get(key, default)
+
+            with (
+                patch.object(api, "runtime_setting_value", side_effect=runtime_value),
+                patch.object(api.subprocess, "run", return_value=completed) as run,
+            ):
+                api.run_paramcad_engine(request)
+
+        sent_env = run.call_args.kwargs["env"]
+        self.assertEqual(sent_env["CAD_SCRIPT_GENERATOR"], "llm")
+        self.assertEqual(sent_env["CAD_SCRIPT_API_KEY"], "runtime-key")
+        self.assertEqual(sent_env["CAD_SCRIPT_BASE_URL"], "https://runtime.deepseek.example")
+        self.assertEqual(sent_env["CAD_SCRIPT_MODEL"], "deepseek-v4-pro")
+        self.assertEqual(sent_env["CAD_SCRIPT_REPAIR"], "true")
+
+    def test_paramcad_cad_script_engine_uses_dedicated_process_timeout(self):
+        with test_env({"PARAMCAD_ENGINE": "cad-script", "CAD_SCRIPT_PROCESS_TIMEOUT_SECONDS": "420"}):
+            api = load_api()
+            request = api.ParamcadRunRequest(requirement="make a detailed industrial support bracket")
+            completed = api.subprocess.CompletedProcess(
+                args=["python", "-m", "cad_script_engine.cli"],
+                returncode=0,
+                stdout=api.json.dumps(
+                    {
+                        "success": True,
+                        "title": "Support Bracket",
+                        "geometryType": "bracket",
+                        "parameters": {"length": 120.0},
+                        "stepFile": "F:\\3DAgent\\apps\\api\\generated\\cad-script\\support_bracket.step",
+                    }
+                ),
+                stderr="",
+            )
+
+            with patch.object(api.subprocess, "run", return_value=completed) as run:
+                api.run_paramcad_engine(request)
+
+        self.assertEqual(run.call_args.kwargs["timeout"], 420)
+
+    def test_paramcad_cad_script_engine_returns_structured_generation_error(self):
+        with test_env({"PARAMCAD_ENGINE": "cad-script"}):
+            api = load_api()
+            request = api.ParamcadRunRequest(requirement="make a detailed industrial support bracket")
+            completed = api.subprocess.CompletedProcess(
+                args=["python", "-m", "cad_script_engine.cli"],
+                returncode=2,
+                stdout=api.json.dumps(
+                    {
+                        "success": False,
+                        "title": None,
+                        "geometryType": None,
+                        "parameters": {},
+                        "sourceFile": None,
+                        "stepFile": None,
+                        "attempts": 0,
+                        "error": "LLM response JSON is invalid",
+                    }
+                ),
+                stderr="",
+            )
+
+            with patch.object(api.subprocess, "run", return_value=completed):
+                with self.assertRaises(api.HTTPException) as caught:
+                    api.run_paramcad_engine(request)
+
+        self.assertEqual(caught.exception.status_code, 502)
+        self.assertIn("LLM response JSON is invalid", str(caught.exception.detail))
+        self.assertNotIn("invalid JSON: Traceback", str(caught.exception.detail))
+
     def test_cadam_fastener_prompt_overrides_wrong_llm_shape(self):
         with test_env({"CADAM_LLM_PROVIDER": "openai", "OPENAI_API_KEY": "test-openai-key"}):
             api = load_api()
