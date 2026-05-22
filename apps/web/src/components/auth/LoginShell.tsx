@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/Button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { formatAuthErrorMessage } from "@/lib/auth-utils";
 import { getSupabaseClient } from "@/lib/supabase";
 
 type LoginMode = "password" | "code";
@@ -20,16 +21,6 @@ function resolveNextPath(value: string | null) {
   }
 
   return value;
-}
-
-function formatSupabaseError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  if (typeof error === "object" && error !== null && "message" in error) {
-    return String((error as { message: unknown }).message);
-  }
-  return "未知错误";
 }
 
 export function LoginShell() {
@@ -124,10 +115,13 @@ export function LoginShell() {
     setIsSendingCode(true);
 
     try {
-      console.info("[Login] 发送登录验证码:", { email });
+      console.info("[Login] 发送登录/注册验证码:", { email });
 
       const { error: sendError } = await supabase.auth.signInWithOtp({
         email: email.trim(),
+        options: {
+          shouldCreateUser: true,
+        },
       });
 
       if (sendError) {
@@ -135,22 +129,11 @@ export function LoginShell() {
         throw sendError;
       }
 
-      setMessage("验证码已发送，请查看邮箱");
+      setMessage("验证码已发送，请查看邮箱；新邮箱会在验证后自动创建账号。");
     } catch (err) {
-      const errorMessage = formatSupabaseError(err);
       console.error("[Login] 发送验证码错误详情:", err);
 
-      let userMessage = "发送验证码失败，请稍后重试";
-
-      if (errorMessage.includes("email")) {
-        userMessage = "该邮箱未注册，请先注册账号";
-      } else if (errorMessage.includes("rate limit")) {
-        userMessage = "发送过于频繁，请稍后再试";
-      } else if (errorMessage.includes("network")) {
-        userMessage = "网络连接失败，请检查网络后重试";
-      }
-
-      setError(userMessage);
+      setError(formatAuthErrorMessage(err, "send-login-code"));
     } finally {
       setIsSendingCode(false);
     }
@@ -181,7 +164,7 @@ export function LoginShell() {
           throw loginError;
         }
       } else {
-        console.info("[Login] 验证码登录:", { email });
+        console.info("[Login] 验证码登录/注册:", { email });
 
         const { error: loginError } = await supabase.auth.verifyOtp({
           email: email.trim(),
@@ -197,28 +180,9 @@ export function LoginShell() {
 
       router.replace(nextPath);
     } catch (err) {
-      const errorMessage = formatSupabaseError(err);
       console.error("[Login] 登录错误:", err);
 
-      let userMessage = "登录失败，请检查账号信息";
-
-      if (errorMessage.includes("invalid email")) {
-        userMessage = "邮箱格式不正确";
-      } else if (errorMessage.includes("invalid credentials")) {
-        userMessage = "邮箱或密码错误";
-      } else if (errorMessage.includes("user not found")) {
-        userMessage = "该邮箱未注册，请先注册账号";
-      } else if (errorMessage.includes("expired")) {
-        userMessage = "验证码已过期，请重新获取";
-      } else if (errorMessage.includes("invalid")) {
-        userMessage = "验证码无效，请检查输入";
-      } else if (errorMessage.includes("network")) {
-        userMessage = "网络连接失败，请检查网络后重试";
-      } else if (errorMessage.includes("rate limit")) {
-        userMessage = "请求过于频繁，请稍后再试";
-      }
-
-      setError(userMessage);
+      setError(formatAuthErrorMessage(err, "login"));
     } finally {
       setIsSubmitting(false);
     }
@@ -272,7 +236,7 @@ export function LoginShell() {
               resetFeedback();
             }}
           >
-            验证码登录
+            验证码登录/注册
           </Button>
         </div>
 
@@ -325,7 +289,7 @@ export function LoginShell() {
                 onClick={() => void sendLoginCode()}
               >
                 {isSendingCode ? <Loader2 className="animate-spin" size={18} /> : <Mail size={18} />}
-                获取验证码
+                获取登录/注册码
               </Button>
             </div>
           </div>

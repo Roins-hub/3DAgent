@@ -47,3 +47,19 @@ test("isDuplicateSignUpResult allows normal new signups", () => {
     false,
   );
 });
+
+test("formatAuthErrorMessage explains disabled Supabase signups", () => {
+  const { formatAuthErrorMessage } = loadAuthUtils();
+
+  assert.equal(
+    formatAuthErrorMessage(new Error("Email signups are disabled"), "send-login-code"),
+    "Supabase 邮箱注册当前未开启，请在 Supabase Auth 设置中启用 Email signup 后再试。",
+  );
+});
+
+test("login OTP explicitly allows creating new users", () => {
+  const sourcePath = path.join(__dirname, "..", "components", "auth", "LoginShell.tsx");
+  const source = fs.readFileSync(sourcePath, "utf8");
+
+  assert.match(source, /shouldCreateUser:\s*true/);
+});
