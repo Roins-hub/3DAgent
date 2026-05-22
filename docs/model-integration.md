@@ -1,4 +1,4 @@
-# Model Integration Contract
+﻿# Model Integration Contract
 
 ## Current MVP
 
@@ -32,19 +32,25 @@ Current limitation: only `mode=text-to-3d` is supported for Meshy in this MVP. I
 
 ## Tencent Cloud Hunyuan3D Provider
 
-Set `MODEL_PROVIDER=hunyuan`, `TENCENTCLOUD_SECRET_ID`, `TENCENTCLOUD_SECRET_KEY`, and optional `TENCENTCLOUD_REGION` in `apps/api/.env`.
+Set `MODEL_PROVIDER=hunyuan` and `TENCENT_TOKENHUB_API_KEY` in `apps/api/.env`.
 
-The provider uses Tencent Cloud API 3.0 signing against `ai3d.tencentcloudapi.com` and the `2025-05-13` API version. The MVP submits `SubmitHunyuanTo3DJob` with:
+The provider uses Tencent TokenHub with model `hy-3d-3.1`, Bearer-token authentication, and these endpoints:
+
+- `POST /v1/api/3d/submit`
+- `POST /v1/api/3d/query`
+
+The MVP submits TokenHub 3D jobs with:
 
 ```json
 {
-  "Prompt": "用户输入的提示词",
-  "ResultFormat": "GLB",
-  "EnablePBR": true
+  "model": "hy-3d-3.1",
+  "prompt": "user prompt",
+  "result_format": "GLB",
+  "enable_pbr": true
 }
 ```
 
-Then it polls `QueryHunyuanTo3DJob` using the returned `JobId`. When a model URL is available in `ResultFile3Ds`, it is written to the local job's `modelUrl`.
+Then it polls `/v1/api/3d/query` using the returned task id. When a model URL is available in `data`, it is written to the local job's `modelUrl`.
 
 ## Neural4D API Provider
 
@@ -98,3 +104,4 @@ Use the same API contract, but route `mode=image-to-3d` jobs to an image-based T
 ## Blender Postprocessing
 
 After generation, a Blender Python worker can normalize scale, set origin, simplify geometry, repack textures, validate material slots, and export the requested format. The API should keep reporting `postprocessing` while this step runs.
+

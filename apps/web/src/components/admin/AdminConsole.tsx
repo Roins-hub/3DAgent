@@ -47,8 +47,7 @@ const editableSettings = [
   { key: "OPENAI_API_KEY", label: "OpenAI API Key", secret: true, placeholder: "保存后不会回显" },
   { key: "SILICONFLOW_API_KEY", label: "SiliconFlow API Key", secret: true, placeholder: "保存后不会回显" },
   { key: "MIMO_API_KEY", label: "MIMO API Key", secret: true, placeholder: "保存后不会回显" },
-  { key: "TENCENTCLOUD_SECRET_ID", label: "腾讯云 SecretId", secret: true, placeholder: "保存后不会回显" },
-  { key: "TENCENTCLOUD_SECRET_KEY", label: "腾讯云 SecretKey", secret: true, placeholder: "保存后不会回显" },
+  { key: "TENCENT_TOKENHUB_API_KEY", label: "Tencent TokenHub API Key", secret: true, placeholder: "保存后不会回显" },
 ];
 
 function formatDate(value: string | null | undefined) {

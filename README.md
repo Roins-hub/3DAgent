@@ -90,11 +90,11 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8016
 
 ```text
 MODEL_PROVIDER=hunyuan
-TENCENTCLOUD_SECRET_ID=your_tencentcloud_secret_id
-TENCENTCLOUD_SECRET_KEY=your_tencentcloud_secret_key
-TENCENTCLOUD_HUNYUAN_PROFILE=domestic
-TENCENTCLOUD_REGION=ap-guangzhou
+TENCENT_TOKENHUB_API_KEY=your_tokenhub_api_key
+TENCENT_TOKENHUB_MODEL=hy-3d-3.1
 ```
+
+混元 3D 使用腾讯 TokenHub：`TENCENT_TOKENHUB_API_KEY` 默认调用 `hy-3d-3.1`。
 
 图片生成可选择 `siliconflow`、`openai` 或 `mock`：
 

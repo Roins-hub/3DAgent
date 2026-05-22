@@ -7,8 +7,7 @@ from unittest.mock import patch
 def test_env(extra_env=None):
     env = {
         "MODEL_PROVIDER": "hunyuan",
-        "TENCENTCLOUD_SECRET_ID": "test-secret-id",
-        "TENCENTCLOUD_SECRET_KEY": "test-secret-key",
+        "TENCENT_TOKENHUB_API_KEY": "tokenhub-key",
     }
     if extra_env:
         env.update(extra_env)
@@ -21,34 +20,7 @@ def load_api():
 
 
 class HunyuanConfigTests(unittest.TestCase):
-    def test_hunyuan_defaults_to_domestic_endpoint(self):
-        with test_env():
-            api = load_api()
-            config = api.tencent_ai3d_config()
-
-        self.assertEqual(config.host, "ai3d.tencentcloudapi.com")
-        self.assertEqual(config.endpoint, "https://ai3d.tencentcloudapi.com")
-        self.assertEqual(config.service, "ai3d")
-        self.assertEqual(config.version, "2025-05-13")
-        self.assertEqual(config.region, "ap-guangzhou")
-
-    def test_hunyuan_can_use_international_profile(self):
-        with test_env(
-            {
-                "TENCENTCLOUD_HUNYUAN_PROFILE": "international",
-                "TENCENTCLOUD_REGION": "ap-singapore",
-            }
-        ):
-            api = load_api()
-            config = api.tencent_ai3d_config()
-
-        self.assertEqual(config.host, "hunyuan.intl.tencentcloudapi.com")
-        self.assertEqual(config.endpoint, "https://hunyuan.intl.tencentcloudapi.com")
-        self.assertEqual(config.service, "hunyuan")
-        self.assertEqual(config.version, "2023-09-01")
-        self.assertEqual(config.region, "ap-singapore")
-
-    def test_hunyuan_uses_configured_standard_actions(self):
+    def test_hunyuan_tokenhub_submits_and_queries_with_bearer_key(self):
         with test_env():
             api = load_api()
             request = api.CreateJobRequest(
@@ -59,33 +31,68 @@ class HunyuanConfigTests(unittest.TestCase):
                 targetFormat="glb",
             )
 
-            with patch.object(
-                api,
-                "call_tencent_ai3d",
-                return_value={"JobId": "job-1"},
-            ) as submit:
+            with patch.object(api.requests, "post") as post:
+                post.return_value.status_code = 200
+                post.return_value.json.return_value = {
+                    "id": "job-1",
+                    "status": "queued",
+                }
                 task_id = api.create_hunyuan_task(request)
 
-            with patch.object(
-                api,
-                "call_tencent_ai3d",
-                return_value={"Status": "DONE"},
-            ) as query:
+                post.return_value.json.return_value = {
+                    "id": "job-1",
+                    "status": "completed",
+                    "data": [{"type": "glb", "url": "https://example.test/model.glb"}],
+                }
                 task = api.query_hunyuan_task("job-1")
 
         self.assertEqual(task_id, "job-1")
-        self.assertEqual(submit.call_args.args[0], "SubmitHunyuanTo3DJob")
+        self.assertEqual(task["status"], "completed")
+        self.assertEqual(post.call_count, 2)
+        submit_call = post.call_args_list[0]
         self.assertEqual(
-            submit.call_args.args[1],
+            submit_call.args[0],
+            "https://tokenhub.tencentmaas.com/v1/api/3d/submit",
+        )
+        self.assertEqual(
+            submit_call.kwargs["headers"]["Authorization"],
+            "Bearer tokenhub-key",
+        )
+        self.assertEqual(
+            submit_call.kwargs["json"],
             {
-                "Prompt": "Generate a ceramic mug",
-                "ResultFormat": "GLB",
-                "EnablePBR": True,
+                "model": "hy-3d-3.1",
+                "prompt": "Generate a ceramic mug",
+                "result_format": "GLB",
+                "enable_pbr": True,
             },
         )
-        self.assertEqual(task, {"Status": "DONE"})
-        self.assertEqual(query.call_args.args[0], "QueryHunyuanTo3DJob")
-        self.assertEqual(query.call_args.args[1], {"JobId": "job-1"})
+        query_call = post.call_args_list[1]
+        self.assertEqual(
+            query_call.args[0],
+            "https://tokenhub.tencentmaas.com/v1/api/3d/query",
+        )
+        self.assertEqual(
+            query_call.kwargs["json"],
+            {"model": "hy-3d-3.1", "id": "job-1"},
+        )
+
+    def test_hunyuan_model_url_reads_tokenhub_data(self):
+        with test_env({"TENCENT_TOKENHUB_API_KEY": "tokenhub-key"}):
+            api = load_api()
+
+        self.assertEqual(
+            api.model_url_from_hunyuan(
+                {
+                    "status": "completed",
+                    "data": [
+                        {"type": "obj", "url": "https://example.test/model.obj"},
+                        {"type": "glb", "url": "https://example.test/model.glb"},
+                    ],
+                }
+            ),
+            "https://example.test/model.glb",
+        )
 
 
 class ImageProviderTests(unittest.TestCase):

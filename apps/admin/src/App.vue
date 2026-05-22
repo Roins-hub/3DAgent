@@ -151,14 +151,8 @@ const editableSettings = [
     placeholder: "未配置",
   },
   {
-    key: "TENCENTCLOUD_SECRET_ID",
-    label: "腾讯云 SecretId",
-    secret: true,
-    placeholder: "未配置",
-  },
-  {
-    key: "TENCENTCLOUD_SECRET_KEY",
-    label: "腾讯云 SecretKey",
+    key: "TENCENT_TOKENHUB_API_KEY",
+    label: "Tencent TokenHub API Key",
     secret: true,
     placeholder: "未配置",
   },
