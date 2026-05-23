@@ -43,6 +43,7 @@ SUPABASE_REQUEST_RETRIES = 2
 SUPABASE_AUTH_CACHE_SECONDS = 60
 ADMIN_SETTINGS_CACHE_SECONDS = 30
 SUPABASE_IMAGE_BUCKET = "generation-assets"
+SUPABASE_MODEL_BUCKET = "generation-assets"
 ADMIN_SECRET_KEYS = {
     "MESHY_API_KEY",
     "NEURAL4D_API_TOKEN",
@@ -403,6 +404,25 @@ def model_media_type(export_format: TargetFormat) -> str:
     return "application/octet-stream"
 
 
+def model_storage_path(job_id: str, export_format: TargetFormat) -> str:
+    return f"model-jobs/{job_id}.{export_format}"
+
+
+def storage_model_url(job_id: str, export_format: TargetFormat) -> str:
+    return f"supabase-storage://{SUPABASE_MODEL_BUCKET}/{model_storage_path(job_id, export_format)}"
+
+
+def parse_storage_url(value: str) -> tuple[str, str] | None:
+    prefix = "supabase-storage://"
+    if not value.startswith(prefix):
+        return None
+    rest = value.removeprefix(prefix)
+    bucket, separator, path = rest.partition("/")
+    if not bucket or not separator or not path:
+        return None
+    return bucket, path
+
+
 def file_response_for_model(job: GenerationJob, export_format: TargetFormat, path: Path):
     return FileResponse(
         path,
@@ -498,9 +518,13 @@ class ModelDownloadError(RuntimeError):
         self.status_code = status_code
 
 
-def download_remote_model(source_url: str, target_path: Path) -> None:
+def download_remote_model(
+    source_url: str,
+    target_path: Path,
+    headers: dict[str, str] | None = None,
+) -> None:
     try:
-        response = requests.get(source_url, stream=True, timeout=120)
+        response = requests.get(source_url, headers=headers, stream=True, timeout=120)
         if response.status_code >= 400:
             if response.status_code in {403, 404}:
                 raise ModelDownloadError(
@@ -533,6 +557,56 @@ def cache_provider_model(job_id: str, target_format: TargetFormat, source_url: s
     if cached_path.exists() and cached_path.stat().st_size > 0:
         return
     download_remote_model(source_url, cached_path)
+
+
+def download_storage_model(storage_url: str, target_path: Path) -> None:
+    parsed = parse_storage_url(storage_url)
+    if not parsed:
+        raise RuntimeError("Unsupported Supabase Storage model URL.")
+    bucket, path = parsed
+    download_remote_model(
+        supabase_storage_url(f"object/{bucket}/{quote(path)}"),
+        target_path,
+        headers={
+            "apikey": supabase_service_role_key(),
+            "Authorization": f"Bearer {supabase_service_role_key()}",
+        },
+    )
+
+
+def upload_generated_model(job_id: str, model_path: Path, export_format: TargetFormat) -> str:
+    response = supabase_request(
+        requests.post,
+        supabase_storage_url(
+            f"object/{SUPABASE_MODEL_BUCKET}/{quote(model_storage_path(job_id, export_format))}"
+        ),
+        headers={
+            "apikey": supabase_service_role_key(),
+            "Authorization": f"Bearer {supabase_service_role_key()}",
+            "Content-Type": model_media_type(export_format),
+            "x-upsert": "true",
+        },
+        data=model_path.read_bytes(),
+        timeout=120,
+    )
+    if not response.ok:
+        raise_supabase_error(response)
+    return storage_model_url(job_id, export_format)
+
+
+def persist_remote_model_to_storage(
+    job_id: str,
+    source_url: str,
+    export_format: TargetFormat,
+) -> str:
+    if parse_storage_url(source_url):
+        return source_url
+    if not source_url.startswith(("http://", "https://")):
+        return source_url
+    cached_path = model_cache_path_for_values(job_id, export_format, source_url)
+    if not cached_path.exists() or cached_path.stat().st_size == 0:
+        download_remote_model(source_url, cached_path)
+    return upload_generated_model(job_id, cached_path, export_format)
 
 
 def selected_provider() -> str:
@@ -2748,14 +2822,7 @@ def storage_image_url(job_id: str) -> str:
 
 
 def parse_storage_image_url(value: str) -> tuple[str, str] | None:
-    prefix = "supabase-storage://"
-    if not value.startswith(prefix):
-        return None
-    rest = value.removeprefix(prefix)
-    bucket, separator, path = rest.partition("/")
-    if not bucket or not separator or not path:
-        return None
-    return bucket, path
+    return parse_storage_url(value)
 
 
 def upload_generated_image(job_id: str, image_path: Path) -> str:
@@ -3165,11 +3232,17 @@ async def run_meshy_generation(job_id: str, request: CreateJobRequest) -> None:
                 model_url = model_url_from_meshy(task, request.targetFormat)
                 if not model_url:
                     raise RuntimeError("Meshy task succeeded but returned no model URL.")
+                stored_model_url = await asyncio.to_thread(
+                    persist_remote_model_to_storage,
+                    job_id,
+                    model_url,
+                    request.targetFormat,
+                )
                 update_job(
                     job_id,
                     status="completed",
                     progress=100,
-                    modelUrl=model_url,
+                    modelUrl=stored_model_url,
                     thumbnailUrl=task.get("thumbnail_url"),
                     error=None,
                 )
@@ -3230,11 +3303,17 @@ async def run_hunyuan_generation(job_id: str, request: CreateJobRequest) -> None
                 model_url = model_url_from_hunyuan(task)
                 if not model_url:
                     raise RuntimeError("混元生 3D 任务成功，但返回结果里没有模型 URL。")
+                stored_model_url = await asyncio.to_thread(
+                    persist_remote_model_to_storage,
+                    job_id,
+                    model_url,
+                    request.targetFormat,
+                )
                 update_job(
                     job_id,
                     status="completed",
                     progress=100,
-                    modelUrl=model_url,
+                    modelUrl=stored_model_url,
                     thumbnailUrl=task.get("ResultImageUrl") or task.get("image_url"),
                     error=None,
                 )
@@ -3342,11 +3421,17 @@ async def run_neural4d_generation(job_id: str, request: CreateJobRequest) -> Non
 
             if not model_url:
                 raise RuntimeError("Neural4D task completed but returned no model URL.")
+            stored_model_url = await asyncio.to_thread(
+                persist_remote_model_to_storage,
+                job_id,
+                str(model_url),
+                request.targetFormat,
+            )
             update_job(
                 job_id,
                 status="completed",
                 progress=100,
-                modelUrl=str(model_url),
+                modelUrl=stored_model_url,
                 thumbnailUrl=retrieved.get("imageUrl"),
                 error=None,
             )
@@ -4123,16 +4208,23 @@ async def get_job_model(
         elif not can_convert_model_locally(source_format, export_format):
             raise format_unavailable_error(job, export_format)
 
-    if not source_url.startswith(("http://", "https://")):
+    storage_source = parse_storage_url(source_url)
+    if not storage_source and not source_url.startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="Unsupported model URL.")
 
     try:
         if source_format == export_format:
-            await asyncio.to_thread(download_remote_model, source_url, cached_path)
+            if storage_source:
+                await asyncio.to_thread(download_storage_model, source_url, cached_path)
+            else:
+                await asyncio.to_thread(download_remote_model, source_url, cached_path)
         else:
             source_path = model_cache_path(job, source_format, source_url)
             if not source_path.exists() or source_path.stat().st_size == 0:
-                await asyncio.to_thread(download_remote_model, source_url, source_path)
+                if storage_source:
+                    await asyncio.to_thread(download_storage_model, source_url, source_path)
+                else:
+                    await asyncio.to_thread(download_remote_model, source_url, source_path)
             await asyncio.to_thread(convert_model_file, source_path, cached_path, export_format)
     except RuntimeError as exc:
         raise HTTPException(

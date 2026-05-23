@@ -198,6 +198,72 @@ class HistoryPersistenceTests(unittest.TestCase):
         self.assertEqual(get.call_count, 1)
         self.assertEqual(first.path, second.path)
 
+    def test_model_download_reads_supabase_storage_url(self):
+        with test_env({"SUPABASE_SERVICE_ROLE_KEY": "service-role"}):
+            api = load_api()
+            row = {
+                "id": "66666666-6666-6666-6666-666666666666",
+                "user_id": "user-1",
+                "kind": "3d",
+                "prompt": "Generate an industrial screw",
+                "mode": "text-to-3d",
+                "status": "completed",
+                "progress": 100,
+                "quality": "balanced",
+                "style": "game-ready",
+                "target_format": "glb",
+                "result_url": "supabase-storage://generation-assets/model-jobs/66666666-6666-6666-6666-666666666666.glb",
+                "thumbnail_url": None,
+                "error": None,
+                "metadata": None,
+                "created_at": "2026-04-28T00:00:00+00:00",
+                "updated_at": "2026-04-28T00:01:00+00:00",
+            }
+            response = response_mock({}, 200)
+            response.iter_content.return_value = [b"glb-bytes"]
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                api.MODEL_CACHE_DIR = api.Path(temp_dir)
+                with (
+                    patch.object(api, "verify_supabase_user", return_value=api.AuthUser(id="user-1")),
+                    patch.object(api, "get_history_row", return_value=row),
+                    patch.object(api.requests, "get", return_value=response) as get,
+                ):
+                    result = asyncio.run(api.get_job_model(row["id"], "glb", "Bearer test-token"))
+
+        self.assertEqual(get.call_count, 1)
+        self.assertEqual(
+            get.call_args.args[0],
+            "https://example.supabase.co/storage/v1/object/generation-assets/model-jobs/66666666-6666-6666-6666-666666666666.glb",
+        )
+        self.assertEqual(get.call_args.kwargs["headers"]["Authorization"], "Bearer service-role")
+        self.assertTrue(str(result.path).endswith(".glb"))
+
+    def test_upload_generated_model_stores_glb_in_generation_assets(self):
+        with test_env({"SUPABASE_SERVICE_ROLE_KEY": "service-role"}):
+            api = load_api()
+            response = response_mock({}, 200)
+            with tempfile.TemporaryDirectory() as temp_dir:
+                model_path = api.Path(temp_dir) / "model.glb"
+                model_path.write_bytes(b"glb-bytes")
+                with patch.object(api.requests, "post", return_value=response) as post:
+                    stored_url = api.upload_generated_model(
+                        "99999999-9999-9999-9999-999999999999",
+                        model_path,
+                        "glb",
+                    )
+
+        self.assertEqual(
+            stored_url,
+            "supabase-storage://generation-assets/model-jobs/99999999-9999-9999-9999-999999999999.glb",
+        )
+        self.assertEqual(
+            post.call_args.args[0],
+            "https://example.supabase.co/storage/v1/object/generation-assets/model-jobs/99999999-9999-9999-9999-999999999999.glb",
+        )
+        self.assertEqual(post.call_args.kwargs["headers"]["Content-Type"], "model/gltf-binary")
+        self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer service-role")
+
     def test_model_download_converts_glb_to_requested_format_when_provider_url_missing(self):
         with test_env():
             api = load_api()
