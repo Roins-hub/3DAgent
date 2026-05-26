@@ -32,25 +32,25 @@ Current limitation: only `mode=text-to-3d` is supported for Meshy in this MVP. I
 
 ## Tencent Cloud Hunyuan3D Provider
 
-Set `MODEL_PROVIDER=hunyuan` and `TENCENT_TOKENHUB_API_KEY` in `apps/api/.env`.
+Set `MODEL_PROVIDER=hunyuan`, `TENCENTCLOUD_SECRET_ID`, and `TENCENTCLOUD_SECRET_KEY` in `apps/api/.env`.
 
-The provider uses Tencent TokenHub with model `hy-3d-3.1`, Bearer-token authentication, and these endpoints:
+The provider uses Tencent Cloud Hunyuan3D API 3.0 with TC3-HMAC-SHA256 request signing:
 
-- `POST /v1/api/3d/submit`
-- `POST /v1/api/3d/query`
+- Endpoint: `POST https://ai3d.tencentcloudapi.com/`
+- Submit action: `SubmitHunyuanTo3DProJob`
+- Query action: `QueryHunyuanTo3DProJob`
 
-The MVP submits TokenHub 3D jobs with:
+The MVP submits Hunyuan 3D jobs with:
 
 ```json
 {
-  "model": "hy-3d-3.1",
-  "prompt": "user prompt",
-  "result_format": "GLB",
-  "enable_pbr": true
+  "Model": "3.1",
+  "Prompt": "user prompt",
+  "EnablePBR": true
 }
 ```
 
-Then it polls `/v1/api/3d/query` using the returned task id. When a model URL is available in `data`, it is written to the local job's `modelUrl`.
+Then it polls `QueryHunyuanTo3DProJob` using the returned `JobId`. When a model URL is available in `ResultFile3Ds`, the API downloads it, stores a durable copy in Supabase Storage, and writes that storage URL to the local job's `modelUrl`.
 
 ## Neural4D API Provider
 

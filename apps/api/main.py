@@ -4,6 +4,7 @@ import asyncio
 import base64
 import contextlib
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -31,8 +32,10 @@ GenerationQuality = Literal["draft", "balanced", "production"]
 ImageAspectRatio = Literal["1:1", "16:9", "9:16", "4:3", "3:4"]
 
 MESHY_BASE_URL = "https://api.meshy.ai/openapi/v2/text-to-3d"
-TENCENT_TOKENHUB_DEFAULT_BASE_URL = "https://tokenhub.tencentmaas.com"
-TENCENT_TOKENHUB_DEFAULT_MODEL = "hy-3d-3.1"
+TENCENTCLOUD_HUNYUAN_DEFAULT_ENDPOINT = "ai3d.tencentcloudapi.com"
+TENCENTCLOUD_HUNYUAN_DEFAULT_VERSION = "2025-05-13"
+TENCENTCLOUD_HUNYUAN_DEFAULT_REGION = "ap-guangzhou"
+TENCENTCLOUD_HUNYUAN_DEFAULT_MODEL = "3.1"
 SILICONFLOW_DEFAULT_IMAGE_MODEL = "Kwai-Kolors/Kolors"
 SILICONFLOW_IMAGE_TIMEOUT_SECONDS = 180
 OPENAI_DEFAULT_IMAGE_MODEL = "gpt-image-2"
@@ -47,7 +50,8 @@ SUPABASE_MODEL_BUCKET = "generation-assets"
 ADMIN_SECRET_KEYS = {
     "MESHY_API_KEY",
     "NEURAL4D_API_TOKEN",
-    "TENCENT_TOKENHUB_API_KEY",
+    "TENCENTCLOUD_SECRET_ID",
+    "TENCENTCLOUD_SECRET_KEY",
     "SILICONFLOW_API_KEY",
     "OPENAI_API_KEY",
     "CADAM_OPENAI_API_KEY",
@@ -74,7 +78,8 @@ ADMIN_VISIBLE_SETTING_KEYS = [
     "DEEPSEEK_API_KEY",
     "SILICONFLOW_API_KEY",
     "MIMO_API_KEY",
-    "TENCENT_TOKENHUB_API_KEY",
+    "TENCENTCLOUD_SECRET_ID",
+    "TENCENTCLOUD_SECRET_KEY",
 ]
 
 
@@ -2537,57 +2542,175 @@ def neural4d_post(path: str, payload: dict[str, Any], timeout: int = 60) -> dict
     return data
 
 
-def tencent_tokenhub_api_key() -> str:
-    return env_or_runtime_secret("TENCENT_TOKENHUB_API_KEY")
+def tencentcloud_secret_id() -> str:
+    return env_or_runtime_secret("TENCENTCLOUD_SECRET_ID")
 
 
-def tencent_tokenhub_base_url() -> str:
+def tencentcloud_secret_key() -> str:
+    return env_or_runtime_secret("TENCENTCLOUD_SECRET_KEY")
+
+
+def tencentcloud_hunyuan_endpoint() -> str:
     return (
-        runtime_setting_value("TENCENT_TOKENHUB_BASE_URL", TENCENT_TOKENHUB_DEFAULT_BASE_URL)
+        runtime_setting_value(
+            "TENCENTCLOUD_HUNYUAN_ENDPOINT",
+            TENCENTCLOUD_HUNYUAN_DEFAULT_ENDPOINT,
+        )
         .strip()
+        .removeprefix("https://")
+        .removeprefix("http://")
         .rstrip("/")
-        or TENCENT_TOKENHUB_DEFAULT_BASE_URL
+        or TENCENTCLOUD_HUNYUAN_DEFAULT_ENDPOINT
     )
 
 
-def tencent_tokenhub_model() -> str:
+def tencentcloud_hunyuan_region() -> str:
     return (
-        runtime_setting_value("TENCENT_TOKENHUB_MODEL", TENCENT_TOKENHUB_DEFAULT_MODEL).strip()
-        or TENCENT_TOKENHUB_DEFAULT_MODEL
+        runtime_setting_value("TENCENTCLOUD_REGION", TENCENTCLOUD_HUNYUAN_DEFAULT_REGION).strip()
+        or TENCENTCLOUD_HUNYUAN_DEFAULT_REGION
     )
 
 
-def call_tencent_tokenhub_3d(path: str, payload: dict[str, Any]) -> dict[str, Any]:
-    api_key = tencent_tokenhub_api_key()
-    if not api_key:
+def tencentcloud_hunyuan_version() -> str:
+    return (
+        runtime_setting_value(
+            "TENCENTCLOUD_HUNYUAN_VERSION",
+            TENCENTCLOUD_HUNYUAN_DEFAULT_VERSION,
+        ).strip()
+        or TENCENTCLOUD_HUNYUAN_DEFAULT_VERSION
+    )
+
+
+def tencentcloud_hunyuan_model() -> str:
+    return (
+        runtime_setting_value(
+            "TENCENTCLOUD_HUNYUAN_MODEL",
+            TENCENTCLOUD_HUNYUAN_DEFAULT_MODEL,
+        ).strip()
+        or TENCENTCLOUD_HUNYUAN_DEFAULT_MODEL
+    )
+
+
+def tencentcloud_hunyuan_submit_action() -> str:
+    return (
+        runtime_setting_value(
+            "TENCENTCLOUD_HUNYUAN_SUBMIT_ACTION",
+            "SubmitHunyuanTo3DProJob",
+        ).strip()
+        or "SubmitHunyuanTo3DProJob"
+    )
+
+
+def tencentcloud_hunyuan_query_action() -> str:
+    return (
+        runtime_setting_value(
+            "TENCENTCLOUD_HUNYUAN_QUERY_ACTION",
+            "QueryHunyuanTo3DProJob",
+        ).strip()
+        or "QueryHunyuanTo3DProJob"
+    )
+
+
+def tencentcloud_hunyuan_result_format(target_format: TargetFormat) -> str | None:
+    if target_format in {"fbx", "stl"}:
+        return target_format.upper()
+    return None
+
+
+def tencentcloud_tc3_headers(action: str, payload: dict[str, Any]) -> dict[str, str]:
+    secret_id = tencentcloud_secret_id()
+    secret_key = tencentcloud_secret_key()
+    if not secret_id or not secret_key:
         raise RuntimeError(
-            "MODEL_PROVIDER=hunyuan requires TENCENT_TOKENHUB_API_KEY for TokenHub."
+            "MODEL_PROVIDER=hunyuan requires TENCENTCLOUD_SECRET_ID and TENCENTCLOUD_SECRET_KEY."
         )
 
+    endpoint = tencentcloud_hunyuan_endpoint()
+    service = "ai3d"
+    algorithm = "TC3-HMAC-SHA256"
+    timestamp = int(time.time())
+    date = datetime.fromtimestamp(timestamp, timezone.utc).strftime("%Y-%m-%d")
+    http_request_method = "POST"
+    canonical_uri = "/"
+    canonical_querystring = ""
+    content_type = "application/json; charset=utf-8"
+    signed_headers = "content-type;host"
+    payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    hashed_request_payload = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+    canonical_headers = f"content-type:{content_type}\nhost:{endpoint}\n"
+    canonical_request = "\n".join(
+        [
+            http_request_method,
+            canonical_uri,
+            canonical_querystring,
+            canonical_headers,
+            signed_headers,
+            hashed_request_payload,
+        ]
+    )
+
+    credential_scope = f"{date}/{service}/tc3_request"
+    hashed_canonical_request = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
+    string_to_sign = "\n".join(
+        [algorithm, str(timestamp), credential_scope, hashed_canonical_request]
+    )
+    secret_date = hmac.new(
+        f"TC3{secret_key}".encode("utf-8"),
+        date.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    secret_service = hmac.new(secret_date, service.encode("utf-8"), hashlib.sha256).digest()
+    secret_signing = hmac.new(
+        secret_service,
+        b"tc3_request",
+        hashlib.sha256,
+    ).digest()
+    signature = hmac.new(
+        secret_signing,
+        string_to_sign.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    authorization = (
+        f"{algorithm} Credential={secret_id}/{credential_scope}, "
+        f"SignedHeaders={signed_headers}, Signature={signature}"
+    )
+    return {
+        "Authorization": authorization,
+        "Content-Type": content_type,
+        "Host": endpoint,
+        "X-TC-Action": action,
+        "X-TC-Version": tencentcloud_hunyuan_version(),
+        "X-TC-Timestamp": str(timestamp),
+        "X-TC-Region": tencentcloud_hunyuan_region(),
+    }
+
+
+def call_tencentcloud_hunyuan(action: str, payload: dict[str, Any]) -> dict[str, Any]:
     response = requests.post(
-        f"{tencent_tokenhub_base_url()}/v1/api/3d/{path}",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
+        f"https://{tencentcloud_hunyuan_endpoint()}/",
+        headers=tencentcloud_tc3_headers(action, payload),
         json=payload,
         timeout=60,
     )
     try:
         data = response.json()
     except ValueError as exc:
-        raise RuntimeError(f"Tencent TokenHub 3D returned invalid JSON: {response.text}") from exc
+        raise RuntimeError(f"Tencent Cloud Hunyuan3D returned invalid JSON: {response.text}") from exc
 
     if not isinstance(data, dict):
-        raise RuntimeError(f"Tencent TokenHub 3D returned an unexpected response: {data}")
+        raise RuntimeError(f"Tencent Cloud Hunyuan3D returned an unexpected response: {data}")
 
-    code = data.get("code")
-    if response.status_code >= 400 or code not in {None, 0, "0"}:
+    response_data = data.get("Response")
+    if not isinstance(response_data, dict):
+        raise RuntimeError(f"Tencent Cloud Hunyuan3D returned an unexpected response: {data}")
+
+    error = response_data.get("Error")
+    if response.status_code >= 400 or isinstance(error, dict):
         raise RuntimeError(
-            f"Tencent TokenHub 3D {path} failed: "
-            f"{json.dumps(data, ensure_ascii=False)}"
+            f"Tencent Cloud Hunyuan3D {action} failed: "
+            f"{json.dumps(response_data, ensure_ascii=False)}"
         )
-    return data
+    return response_data
 
 
 def hunyuan_result_format(target_format: TargetFormat) -> str:
@@ -2595,35 +2718,26 @@ def hunyuan_result_format(target_format: TargetFormat) -> str:
 
 
 def create_hunyuan_task(request: CreateJobRequest) -> str:
-    response = call_tencent_tokenhub_3d(
-        "submit",
-        {
-            "model": tencent_tokenhub_model(),
-            "prompt": request.prompt.strip(),
-            "result_format": hunyuan_result_format(request.targetFormat),
-            "enable_pbr": True,
-        },
-    )
-    response_data = response.get("data")
-    job_id = response.get("id") or response.get("task_id") or response.get("job_id")
-    if not job_id and isinstance(response_data, dict):
-        job_id = (
-            response_data.get("id")
-            or response_data.get("task_id")
-            or response_data.get("job_id")
-        )
+    payload: dict[str, Any] = {
+        "Model": tencentcloud_hunyuan_model(),
+        "Prompt": request.prompt.strip(),
+        "EnablePBR": True,
+    }
+    result_format = tencentcloud_hunyuan_result_format(request.targetFormat)
+    if result_format:
+        payload["ResultFormat"] = result_format
+
+    response = call_tencentcloud_hunyuan(tencentcloud_hunyuan_submit_action(), payload)
+    job_id = response.get("JobId") or response.get("job_id") or response.get("TaskId")
     if not job_id:
-        raise RuntimeError("Tencent TokenHub 3D submit response did not include a task id.")
+        raise RuntimeError("Tencent Cloud Hunyuan3D submit response did not include a job id.")
     return str(job_id)
 
 
 def query_hunyuan_task(provider_job_id: str) -> dict[str, Any]:
-    return call_tencent_tokenhub_3d(
-        "query",
-        {
-            "model": tencent_tokenhub_model(),
-            "id": provider_job_id,
-        },
+    return call_tencentcloud_hunyuan(
+        tencentcloud_hunyuan_query_action(),
+        {"JobId": provider_job_id},
     )
 
 def model_url_from_hunyuan(task: dict[str, Any]) -> str | None:
@@ -3983,10 +4097,10 @@ async def _create_job_once(
             status_code=400,
             detail="MODEL_PROVIDER=neural4d requires NEURAL4D_API_TOKEN in .env or the shell environment.",
         )
-    if provider == "hunyuan" and not tencent_tokenhub_api_key():
+    if provider == "hunyuan" and (not tencentcloud_secret_id() or not tencentcloud_secret_key()):
         raise HTTPException(
             status_code=400,
-            detail="MODEL_PROVIDER=hunyuan requires TENCENT_TOKENHUB_API_KEY in .env or the shell environment.",
+            detail="MODEL_PROVIDER=hunyuan requires TENCENTCLOUD_SECRET_ID and TENCENTCLOUD_SECRET_KEY in .env or the shell environment.",
         )
 
     timestamp = now_iso()
