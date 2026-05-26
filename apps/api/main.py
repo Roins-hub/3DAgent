@@ -2617,6 +2617,10 @@ def tencentcloud_hunyuan_result_format(target_format: TargetFormat) -> str | Non
     return None
 
 
+def tencentcloud_payload_json(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
 def tencentcloud_tc3_headers(action: str, payload: dict[str, Any]) -> dict[str, str]:
     secret_id = tencentcloud_secret_id()
     secret_key = tencentcloud_secret_key()
@@ -2635,7 +2639,7 @@ def tencentcloud_tc3_headers(action: str, payload: dict[str, Any]) -> dict[str, 
     canonical_querystring = ""
     content_type = "application/json; charset=utf-8"
     signed_headers = "content-type;host"
-    payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    payload_json = tencentcloud_payload_json(payload)
     hashed_request_payload = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
     canonical_headers = f"content-type:{content_type}\nhost:{endpoint}\n"
     canonical_request = "\n".join(
@@ -2686,10 +2690,11 @@ def tencentcloud_tc3_headers(action: str, payload: dict[str, Any]) -> dict[str, 
 
 
 def call_tencentcloud_hunyuan(action: str, payload: dict[str, Any]) -> dict[str, Any]:
+    payload_json = tencentcloud_payload_json(payload)
     response = requests.post(
         f"https://{tencentcloud_hunyuan_endpoint()}/",
         headers=tencentcloud_tc3_headers(action, payload),
-        json=payload,
+        data=payload_json.encode("utf-8"),
         timeout=60,
     )
     try:

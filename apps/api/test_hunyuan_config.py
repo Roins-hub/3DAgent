@@ -75,20 +75,21 @@ class HunyuanConfigTests(unittest.TestCase):
         self.assertIn("TC3-HMAC-SHA256 Credential=secret-id/", submit_headers["Authorization"])
         self.assertIn("/ai3d/tc3_request", submit_headers["Authorization"])
         self.assertEqual(
-            submit_call.kwargs["json"],
+            api.json.loads(submit_call.kwargs["data"].decode("utf-8")),
             {
                 "Model": "3.1",
                 "Prompt": "Generate a ceramic mug",
                 "EnablePBR": True,
             },
         )
+        self.assertNotIn("json", submit_call.kwargs)
         query_call = post.call_args_list[1]
         self.assertEqual(
             query_call.args[0],
             "https://ai3d.tencentcloudapi.com/",
         )
         self.assertEqual(query_call.kwargs["headers"]["X-TC-Action"], "QueryHunyuanTo3DProJob")
-        self.assertEqual(query_call.kwargs["json"], {"JobId": "job-1"})
+        self.assertEqual(api.json.loads(query_call.kwargs["data"].decode("utf-8")), {"JobId": "job-1"})
 
     def test_hunyuan_stl_request_sends_result_format(self):
         with test_env():
@@ -108,7 +109,10 @@ class HunyuanConfigTests(unittest.TestCase):
                 }
                 api.create_hunyuan_task(request)
 
-        self.assertEqual(post.call_args.kwargs["json"]["ResultFormat"], "STL")
+        self.assertEqual(
+            api.json.loads(post.call_args.kwargs["data"].decode("utf-8"))["ResultFormat"],
+            "STL",
+        )
 
     def test_hunyuan_model_url_reads_tokenhub_data(self):
         with test_env():
