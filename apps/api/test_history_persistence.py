@@ -4,9 +4,12 @@ import os
 import tempfile
 import time
 import unittest
+import zipfile
 from unittest.mock import Mock, patch
 
 import requests
+
+VALID_GLB_BYTES = b"glTF\x02\x00\x00\x00\x0c\x00\x00\x00"
 
 
 def test_env(extra_env=None):
@@ -33,6 +36,11 @@ def response_mock(payload, status_code=200):
     response.text = str(payload)
     response.json.return_value = payload
     return response
+
+
+def write_obj_zip(path):
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("model.obj", "o Cube\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
 
 
 class HistoryPersistenceTests(unittest.TestCase):
@@ -183,7 +191,7 @@ class HistoryPersistenceTests(unittest.TestCase):
             }
             response = response_mock({}, 200)
             response.headers = {"content-type": "model/gltf-binary"}
-            response.iter_content.return_value = [b"glb-bytes"]
+            response.iter_content.return_value = [VALID_GLB_BYTES]
 
             with tempfile.TemporaryDirectory() as temp_dir:
                 api.MODEL_CACHE_DIR = api.Path(temp_dir)
@@ -220,7 +228,7 @@ class HistoryPersistenceTests(unittest.TestCase):
                 "updated_at": "2026-04-28T00:01:00+00:00",
             }
             response = response_mock({}, 200)
-            response.iter_content.return_value = [b"glb-bytes"]
+            response.iter_content.return_value = [VALID_GLB_BYTES]
 
             with tempfile.TemporaryDirectory() as temp_dir:
                 api.MODEL_CACHE_DIR = api.Path(temp_dir)
@@ -245,7 +253,7 @@ class HistoryPersistenceTests(unittest.TestCase):
             response = response_mock({}, 200)
             with tempfile.TemporaryDirectory() as temp_dir:
                 model_path = api.Path(temp_dir) / "model.glb"
-                model_path.write_bytes(b"glb-bytes")
+                model_path.write_bytes(VALID_GLB_BYTES)
                 with patch.object(api.requests, "post", return_value=response) as post:
                     stored_url = api.upload_generated_model(
                         "99999999-9999-9999-9999-999999999999",
@@ -263,6 +271,39 @@ class HistoryPersistenceTests(unittest.TestCase):
         )
         self.assertEqual(post.call_args.kwargs["headers"]["Content-Type"], "model/gltf-binary")
         self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer service-role")
+
+    def test_persist_remote_model_converts_obj_zip_before_uploading_glb(self):
+        with test_env({"SUPABASE_SERVICE_ROLE_KEY": "service-role"}):
+            api = load_api()
+
+            def fake_download(_source_url, target_path):
+                write_obj_zip(target_path)
+
+            def fake_convert(_zip_path, target_path):
+                target_path.write_bytes(b"glTF-converted")
+
+            with tempfile.TemporaryDirectory() as temp_dir:
+                api.MODEL_CACHE_DIR = api.Path(temp_dir)
+                with (
+                    patch.object(api, "download_remote_model", side_effect=fake_download),
+                    patch.object(api, "convert_obj_zip_to_glb", side_effect=fake_convert) as convert,
+                    patch.object(api, "upload_generated_model") as upload,
+                ):
+                    upload.side_effect = lambda job_id, model_path, export_format: (
+                        self.assertEqual(model_path.read_bytes(), b"glTF-converted")
+                        or api.storage_model_url(job_id, export_format)
+                    )
+                    stored_url = api.persist_remote_model_to_storage(
+                        "99999999-9999-9999-9999-999999999999",
+                        "https://assets.example/model.zip",
+                        "glb",
+                    )
+
+        self.assertEqual(
+            stored_url,
+            "supabase-storage://generation-assets/model-jobs/99999999-9999-9999-9999-999999999999.glb",
+        )
+        self.assertEqual(convert.call_count, 1)
 
     def test_model_download_converts_glb_to_requested_format_when_provider_url_missing(self):
         with test_env():
@@ -286,7 +327,7 @@ class HistoryPersistenceTests(unittest.TestCase):
                 "updated_at": "2026-04-28T00:01:00+00:00",
             }
             response = response_mock({}, 200)
-            response.iter_content.return_value = [b"glb-bytes"]
+            response.iter_content.return_value = [VALID_GLB_BYTES]
 
             with tempfile.TemporaryDirectory() as temp_dir:
                 api.MODEL_CACHE_DIR = api.Path(temp_dir)

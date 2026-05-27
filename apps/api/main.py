@@ -9,7 +9,9 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import time
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -323,6 +325,12 @@ LEGACY_IMAGE_CACHE_DIR = Path(os.environ.get("THREEDAGENT_LEGACY_IMAGE_CACHE_DIR
 MODEL_CONVERTER_SCRIPT = Path(
     os.environ.get("THREEDAGENT_MODEL_CONVERTER_SCRIPT", API_DIR / "scripts" / "convert_model.mjs")
 )
+OBJ_TO_GLB_CONVERTER_SCRIPT = Path(
+    os.environ.get(
+        "THREEDAGENT_OBJ_TO_GLB_CONVERTER_SCRIPT",
+        API_DIR / "scripts" / "convert_obj_to_glb.mjs",
+    )
+)
 PLACEHOLDER_IMAGE_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR4nGN4+PDhfwAIAwMBPMf5OgAAAABJRU5ErkJggg=="
 )
@@ -517,6 +525,73 @@ def convert_model_file(source_path: Path, target_path: Path, target_format: Targ
         raise RuntimeError(f"Model conversion failed: {message}")
 
 
+def file_starts_with(path: Path, signature: bytes) -> bool:
+    try:
+        with path.open("rb") as handle:
+            return handle.read(len(signature)) == signature
+    except OSError:
+        return False
+
+
+def is_zip_model_package(path: Path) -> bool:
+    return file_starts_with(path, b"PK\x03\x04")
+
+
+def is_glb_file(path: Path) -> bool:
+    return file_starts_with(path, b"glTF")
+
+
+def safe_extract_zip(zip_path: Path, target_dir: Path) -> None:
+    target_root = target_dir.resolve()
+    with zipfile.ZipFile(zip_path) as archive:
+        for member in archive.infolist():
+            member_path = (target_root / member.filename).resolve()
+            if member_path != target_root and target_root not in member_path.parents:
+                raise RuntimeError("Model package contains an unsafe path.")
+        archive.extractall(target_root)
+
+
+def convert_obj_zip_to_glb(zip_path: Path, target_path: Path) -> None:
+    MODEL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="objzip-", dir=MODEL_CACHE_DIR) as temp_dir_name:
+        temp_dir = Path(temp_dir_name)
+        safe_extract_zip(zip_path, temp_dir)
+        obj_files = sorted(temp_dir.rglob("*.obj"))
+        if not obj_files:
+            raise RuntimeError("Tencent Cloud model package did not include an OBJ file.")
+        output_path = target_path
+        if zip_path.resolve() == target_path.resolve():
+            output_path = target_path.with_suffix(f"{target_path.suffix}.converted")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        result = subprocess.run(
+            [
+                "node",
+                str(OBJ_TO_GLB_CONVERTER_SCRIPT),
+                str(obj_files[0]),
+                str(output_path),
+            ],
+            cwd=ROOT_DIR,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+        if result.returncode != 0:
+            message = (result.stderr or result.stdout or "Unknown OBJ conversion error").strip()
+            raise RuntimeError(f"OBJ package conversion failed: {message}")
+        if output_path != target_path:
+            output_path.replace(target_path)
+
+
+def ensure_glb_model_file(model_path: Path) -> None:
+    if is_glb_file(model_path):
+        return
+    if is_zip_model_package(model_path):
+        convert_obj_zip_to_glb(model_path, model_path)
+        return
+    raise RuntimeError("Provider returned a file that is not a valid GLB model.")
+
+
 class ModelDownloadError(RuntimeError):
     def __init__(self, message: str, status_code: int | None = None) -> None:
         super().__init__(message)
@@ -611,6 +686,8 @@ def persist_remote_model_to_storage(
     cached_path = model_cache_path_for_values(job_id, export_format, source_url)
     if not cached_path.exists() or cached_path.stat().st_size == 0:
         download_remote_model(source_url, cached_path)
+    if export_format == "glb":
+        ensure_glb_model_file(cached_path)
     return upload_generated_model(job_id, cached_path, export_format)
 
 
@@ -4337,6 +4414,8 @@ async def get_job_model(
                 await asyncio.to_thread(download_storage_model, source_url, cached_path)
             else:
                 await asyncio.to_thread(download_remote_model, source_url, cached_path)
+            if export_format == "glb":
+                await asyncio.to_thread(ensure_glb_model_file, cached_path)
         else:
             source_path = model_cache_path(job, source_format, source_url)
             if not source_path.exists() or source_path.stat().st_size == 0:
