@@ -4379,6 +4379,11 @@ async def get_job_model(
 
     cached_path = model_cache_path(job, export_format, job.modelUrl)
     if cached_path.exists() and cached_path.stat().st_size > 0:
+        if export_format == "glb":
+            try:
+                await asyncio.to_thread(ensure_glb_model_file, cached_path)
+            except RuntimeError as exc:
+                raise HTTPException(status_code=502, detail=str(exc)) from exc
         return file_response_for_model(job, export_format, cached_path)
 
     if job.modelUrl == "/models/demo-asset.glb":
