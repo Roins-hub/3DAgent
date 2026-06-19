@@ -23,6 +23,16 @@ function resolveNextPath(value: string | null) {
   return value;
 }
 
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "object" && error !== null && "message" in error) {
+    return String((error as { message: unknown }).message);
+  }
+  return String(error);
+}
+
 export function LoginShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -42,6 +52,7 @@ export function LoginShell() {
   const [isTyping, setIsTyping] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSendingCode, setIsSendingCode] = useState(false);
+  const [isSendingResetLink, setIsSendingResetLink] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -91,8 +102,8 @@ export function LoginShell() {
       return false;
     }
 
-    if (!/^\d{8}$/.test(code.trim())) {
-      setError("验证码必须是8位数字");
+    if (!/^\d{6}$/.test(code.trim())) {
+      setError("验证码必须是6位数字");
       return false;
     }
 
@@ -125,17 +136,56 @@ export function LoginShell() {
       });
 
       if (sendError) {
-        console.error("[Login] 发送验证码失败:", sendError);
-        throw sendError;
+        console.info("[Login] 发送验证码失败:", sendError.message);
+        setError(formatAuthErrorMessage(sendError, "send-login-code"));
+        return;
       }
 
       setMessage("验证码已发送，请查看邮箱；新邮箱会在验证后自动创建账号。");
     } catch (err) {
-      console.error("[Login] 发送验证码错误详情:", err);
-
+      console.info("[Login] 发送验证码网络错误:", getErrorMessage(err));
       setError(formatAuthErrorMessage(err, "send-login-code"));
     } finally {
       setIsSendingCode(false);
+    }
+  }
+
+  async function sendPasswordResetEmail() {
+    resetFeedback();
+
+    if (!email.trim()) {
+      setError("请输入邮箱地址。");
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("请输入有效的邮箱地址。");
+      return;
+    }
+
+    setIsSendingResetLink(true);
+
+    try {
+      const redirectTo =
+        typeof window !== "undefined"
+          ? `${window.location.origin}/reset-password`
+          : undefined;
+
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(
+        email.trim(),
+        { redirectTo },
+      );
+
+      if (resetError) {
+        throw resetError;
+      }
+
+      setMessage("重置密码邮件已发送，请前往邮箱点击重置链接。");
+    } catch (err) {
+      console.error("[Login] password reset error:", err);
+      setError(formatAuthErrorMessage(err, "send-login-code"));
+    } finally {
+      setIsSendingResetLink(false);
     }
   }
 
@@ -160,8 +210,9 @@ export function LoginShell() {
         });
 
         if (loginError) {
-          console.error("[Login] 密码登录失败:", loginError);
-          throw loginError;
+          console.info("[Login] 密码登录未通过:", loginError.message);
+          setError(formatAuthErrorMessage(loginError, "password-login"));
+          return;
         }
       } else {
         console.info("[Login] 验证码登录/注册:", { email });
@@ -173,16 +224,17 @@ export function LoginShell() {
         });
 
         if (loginError) {
-          console.error("[Login] 验证码登录失败:", loginError);
-          throw loginError;
+          console.info("[Login] 验证码登录未通过:", loginError.message);
+          setError(formatAuthErrorMessage(loginError, "otp-login"));
+          return;
         }
       }
 
       router.replace(nextPath);
     } catch (err) {
-      console.error("[Login] 登录错误:", err);
+      console.info("[Login] 登录请求未完成:", err);
 
-      setError(formatAuthErrorMessage(err, "login"));
+      setError(formatAuthErrorMessage(err, loginMode === "password" ? "password-login" : "otp-login"));
     } finally {
       setIsSubmitting(false);
     }
@@ -265,6 +317,14 @@ export function LoginShell() {
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
+            <button
+              type="button"
+              className="self-end text-sm font-semibold text-muted-foreground transition hover:text-foreground"
+              disabled={isSendingResetLink}
+              onClick={() => void sendPasswordResetEmail()}
+            >
+              {isSendingResetLink ? "正在发送找回链接..." : "忘记密码"}
+            </button>
           </div>
         ) : (
           <div className="flex flex-col gap-2">
@@ -279,7 +339,7 @@ export function LoginShell() {
                 onChange={(event) => setCode(event.target.value)}
                 onFocus={() => setIsTyping(true)}
                 onBlur={() => setIsTyping(false)}
-                placeholder="请输入8位验证码"
+                placeholder="请输入6位验证码"
                 className="flex-1"
               />
               <Button

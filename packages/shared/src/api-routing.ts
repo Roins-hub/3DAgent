@@ -10,20 +10,38 @@ export function isLocalHostname(hostname: string | undefined | null): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
+function isLoopbackApiBaseUrl(value: string): boolean {
+  try {
+    return isLocalHostname(new URL(value).hostname);
+  } catch {
+    return false;
+  }
+}
+
 export function apiBaseUrlCandidates(
   primaryBaseUrl: string | undefined | null,
   browserHostname: string | undefined | null,
   preferDesktopApi = false,
 ): string[] {
   const configuredPrimary = primaryBaseUrl?.trim();
+  const isLocalPage = isLocalHostname(browserHostname);
+  if (configuredPrimary === "/api" || configuredPrimary === "/api/") {
+    return [""];
+  }
+
   const primary = configuredPrimary
     ? normalizeApiBaseUrl(configuredPrimary)
-    : isLocalHostname(browserHostname)
+    : isLocalPage
       ? DEFAULT_API_BASE_URL
       : "";
+
+  if (!isLocalPage && primary && isLoopbackApiBaseUrl(primary)) {
+    return [""];
+  }
+
   const candidates = [primary];
 
-  if (!isLocalHostname(browserHostname)) {
+  if (!isLocalPage) {
     return candidates;
   }
 

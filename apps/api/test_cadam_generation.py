@@ -321,6 +321,11 @@ class CadamGenerationTests(unittest.TestCase):
             with (
                 patch.object(api, "verify_supabase_user", return_value=api.AuthUser(id="user-1", email="u@example.com")),
                 patch.object(api, "run_paramcad_engine", return_value=generated),
+                patch.object(
+                    api,
+                    "upload_paramcad_step_file",
+                    return_value="supabase-storage://generation-assets/paramcad-jobs/stored-job.step",
+                ) as upload_step,
                 patch.object(api, "insert_history_row") as insert_history,
             ):
                 import asyncio
@@ -328,6 +333,8 @@ class CadamGenerationTests(unittest.TestCase):
                 result = asyncio.run(run_endpoint())
 
         self.assertEqual(result.title, "spindle shaft")
+        upload_step.assert_called_once()
+        self.assertEqual(upload_step.call_args.args[1], "spindle.step")
         insert_history.assert_called_once()
         row, authorization = insert_history.call_args.args
         self.assertEqual(authorization, "Bearer token")
@@ -335,9 +342,11 @@ class CadamGenerationTests(unittest.TestCase):
         self.assertEqual(row["kind"], "paramcad")
         self.assertEqual(row["status"], "completed")
         self.assertEqual(row["target_format"], "step")
-        self.assertEqual(row["result_url"], "/api/paramcad/outputs/spindle.step")
+        self.assertEqual(row["result_url"], "supabase-storage://generation-assets/paramcad-jobs/stored-job.step")
         self.assertEqual(row["metadata"]["runFea"], True)
         self.assertEqual(row["metadata"]["provider"], "cad-script-engine")
+        self.assertEqual(row["metadata"]["stepDownloadUrl"], "/api/paramcad/outputs/spindle.step")
+        self.assertEqual(row["metadata"]["stepStorageUrl"], "supabase-storage://generation-assets/paramcad-jobs/stored-job.step")
 
     def test_paramcad_run_deduplicates_same_client_request_id(self):
         with test_env():
@@ -364,6 +373,11 @@ class CadamGenerationTests(unittest.TestCase):
             with (
                 patch.object(api, "verify_supabase_user", return_value=api.AuthUser(id="user-1", email="u@example.com")),
                 patch.object(api, "run_paramcad_engine", return_value=generated) as run_engine,
+                patch.object(
+                    api,
+                    "upload_paramcad_step_file",
+                    return_value="supabase-storage://generation-assets/paramcad-jobs/stored-job.step",
+                ),
                 patch.object(api, "insert_history_row") as insert_history,
             ):
                 import asyncio

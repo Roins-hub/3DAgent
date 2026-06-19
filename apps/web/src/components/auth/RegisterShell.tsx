@@ -16,7 +16,7 @@ import { AuthSplitPage } from "@/components/ui/animated-characters-auth-page";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { isDuplicateSignUpResult } from "@/lib/auth-utils";
+import { formatAuthErrorMessage, isDuplicateSignUpResult } from "@/lib/auth-utils";
 import { getSupabaseClient } from "@/lib/supabase";
 
 type RegisterStep = "details" | "code";
@@ -140,8 +140,9 @@ export function RegisterShell() {
       });
 
       if (signUpError) {
-        console.error("[Register] 注册失败:", signUpError);
-        throw signUpError;
+        console.info("[Register] 注册未通过:", signUpError.message);
+        setError(formatAuthErrorMessage(signUpError, "register"));
+        return;
       }
 
       if (isDuplicateSignUpResult(data)) {
@@ -157,29 +158,12 @@ export function RegisterShell() {
       setRegisterStep("code");
       setMessage("验证码已发送，请查看邮箱（包括垃圾邮件箱）");
     } catch (err) {
-      const errorMessage = formatSupabaseError(err);
-      console.error("[Register] 注册错误详情:", err);
-
-      let userMessage = "注册失败，请稍后重试";
-
-      if (errorMessage.toLowerCase().includes("already") || errorMessage.toLowerCase().includes("registered")) {
-        userMessage = "该邮箱已经注册，请直接登录或换一个邮箱。";
-      } else if (errorMessage.includes("email")) {
-        userMessage = "该邮箱已被注册，或邮箱格式不正确";
-      } else if (errorMessage.includes("password")) {
-        userMessage = "密码不符合要求，请使用更安全的密码";
-      } else if (errorMessage.includes("network")) {
-        userMessage = "网络连接失败，请检查网络后重试";
-      } else if (errorMessage.includes("rate limit")) {
-        userMessage = "请求过于频繁，请稍后再试";
-      }
-
-      setError(userMessage);
+      console.info("[Register] registration request failed:", err);
+      setError(formatAuthErrorMessage(err, "register"));
     } finally {
       setIsSubmitting(false);
     }
   }
-
   async function verifyRegisterCode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     resetFeedback();
@@ -189,8 +173,8 @@ export function RegisterShell() {
       return;
     }
 
-    if (!/^\d{8}$/.test(code.trim())) {
-      setError("验证码必须是8位数字");
+    if (!/^\d{6}$/.test(code.trim())) {
+      setError("验证码必须是6位数字");
       return;
     }
 
@@ -206,8 +190,9 @@ export function RegisterShell() {
       });
 
       if (verifyError) {
-        console.error("[Register] 验证码验证失败:", verifyError);
-        throw verifyError;
+        console.info("[Register] 验证码验证未通过:", verifyError.message);
+        setError(formatAuthErrorMessage(verifyError, "verify-register-code"));
+        return;
       }
 
       console.info("[Register] 验证成功，开始保存用户名:", { userId: data?.user?.id, username });
@@ -231,20 +216,8 @@ export function RegisterShell() {
         router.replace(nextPath);
       }, 1000);
     } catch (err) {
-      const errorMessage = formatSupabaseError(err);
-      console.error("[Register] 验证错误详情:", err);
-
-      let userMessage = "验证码验证失败，请重新输入";
-
-      if (errorMessage.includes("expired")) {
-        userMessage = "验证码已过期，请重新获取";
-      } else if (errorMessage.includes("invalid")) {
-        userMessage = "验证码无效，请检查输入";
-      } else if (errorMessage.includes("network")) {
-        userMessage = "网络连接失败，请检查网络后重试";
-      }
-
-      setError(userMessage);
+      console.info("[Register] verification request failed:", err);
+      setError(formatAuthErrorMessage(err, "verify-register-code"));
     } finally {
       setIsSubmitting(false);
     }
@@ -263,8 +236,9 @@ export function RegisterShell() {
       });
 
       if (resendError) {
-        console.error("[Register] 重新发送失败:", resendError);
-        throw resendError;
+        console.info("[Register] 重新发送未通过:", resendError.message);
+        setError(formatAuthErrorMessage(resendError, "send-login-code"));
+        return;
       }
 
       setMessage("验证码已重新发送，请查看邮箱");
@@ -383,7 +357,7 @@ export function RegisterShell() {
               onChange={(event) => setCode(event.target.value)}
               onFocus={() => setIsTyping(true)}
               onBlur={() => setIsTyping(false)}
-              placeholder="请输入8位验证码"
+              placeholder="请输入6位验证码"
               required
             />
           </div>

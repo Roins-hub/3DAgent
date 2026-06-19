@@ -425,6 +425,14 @@ def storage_model_url(job_id: str, export_format: TargetFormat) -> str:
     return f"supabase-storage://{SUPABASE_MODEL_BUCKET}/{model_storage_path(job_id, export_format)}"
 
 
+def paramcad_step_storage_path(job_id: str) -> str:
+    return f"paramcad-jobs/{job_id}.step"
+
+
+def storage_paramcad_step_url(job_id: str) -> str:
+    return f"supabase-storage://{SUPABASE_MODEL_BUCKET}/{paramcad_step_storage_path(job_id)}"
+
+
 def parse_storage_url(value: str) -> tuple[str, str] | None:
     prefix = "supabase-storage://"
     if not value.startswith(prefix):
@@ -457,6 +465,27 @@ def paramcad_output_path(step_file: str) -> Path:
     if local_file == output_root or output_root not in local_file.parents or not local_file.is_file():
         raise HTTPException(status_code=404, detail="File not found.")
     return local_file
+
+
+def upload_paramcad_step_file(job_id: str, step_file: str) -> str:
+    step_path = paramcad_output_path(step_file)
+    response = supabase_request(
+        requests.post,
+        supabase_storage_url(
+            f"object/{SUPABASE_MODEL_BUCKET}/{quote(paramcad_step_storage_path(job_id))}"
+        ),
+        headers={
+            "apikey": supabase_service_role_key(),
+            "Authorization": f"Bearer {supabase_service_role_key()}",
+            "Content-Type": "application/step",
+            "x-upsert": "true",
+        },
+        data=step_path.read_bytes(),
+        timeout=120,
+    )
+    if not response.ok:
+        raise_supabase_error(response)
+    return storage_paramcad_step_url(job_id)
 
 
 def convert_step_to_stl_preview(step_path: Path, stl_path: Path) -> None:
@@ -2105,7 +2134,30 @@ def paramcad_response_to_history_row(
     response: ParamcadRunResponse,
     user_id: str,
     timestamp: str,
+    step_storage_url: str | None = None,
 ) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "title": response.title,
+        "domain": response.domain,
+        "material": response.material,
+        "geometryType": response.geometryType,
+        "parameters": response.parameters,
+        "score": response.score,
+        "iterations": response.iterations,
+        "safetyFactor": response.safetyFactor,
+        "maxStress": response.maxStress,
+        "feaPassed": response.feaPassed,
+        "stepFile": response.stepFile,
+        "stepDownloadUrl": response.stepDownloadUrl,
+        "sourceFile": response.sourceFile,
+        "provider": response.provider,
+        "model": response.model,
+        "runFea": request.runFea,
+        "clientRequestId": normalized_client_request_id(request.clientRequestId),
+    }
+    if step_storage_url:
+        metadata["stepStorageUrl"] = step_storage_url
+
     return {
         "id": job_id,
         "user_id": user_id,
@@ -2118,28 +2170,10 @@ def paramcad_response_to_history_row(
         "style": None,
         "target_format": "step",
         "aspect_ratio": None,
-        "result_url": response.stepDownloadUrl,
+        "result_url": step_storage_url or response.stepDownloadUrl,
         "thumbnail_url": None,
         "error": None if response.success else response.message,
-        "metadata": {
-            "title": response.title,
-            "domain": response.domain,
-            "material": response.material,
-            "geometryType": response.geometryType,
-            "parameters": response.parameters,
-            "score": response.score,
-            "iterations": response.iterations,
-            "safetyFactor": response.safetyFactor,
-            "maxStress": response.maxStress,
-            "feaPassed": response.feaPassed,
-            "stepFile": response.stepFile,
-            "stepDownloadUrl": response.stepDownloadUrl,
-            "sourceFile": response.sourceFile,
-            "provider": response.provider,
-            "model": response.model,
-            "runFea": request.runFea,
-            "clientRequestId": normalized_client_request_id(request.clientRequestId),
-        },
+        "metadata": metadata,
         "created_at": timestamp,
         "updated_at": timestamp,
     }
@@ -3834,7 +3868,15 @@ def retry_admin_generation(row: dict[str, Any], admin: AuthUser) -> dict[str, An
         )
         try:
             result = run_paramcad_engine(request)
-            retry_row = paramcad_response_to_history_row(new_id, request, result, str(row.get("user_id") or ""), timestamp)
+            step_storage_url = upload_paramcad_step_file(new_id, result.stepFile) if result.success and result.stepFile else None
+            retry_row = paramcad_response_to_history_row(
+                new_id,
+                request,
+                result,
+                str(row.get("user_id") or ""),
+                timestamp,
+                step_storage_url,
+            )
             retry_row["metadata"] = {
                 **(retry_row.get("metadata") if isinstance(retry_row.get("metadata"), dict) else {}),
                 "retried_from": row.get("id"),
@@ -4106,8 +4148,11 @@ async def _run_paramcad_and_record_history(
         raise
 
     if user and auth_header:
+        step_storage_url = None
+        if result.success and result.stepFile:
+            step_storage_url = await asyncio.to_thread(upload_paramcad_step_file, job_id, result.stepFile)
         try_insert_paramcad_history_row(
-            paramcad_response_to_history_row(job_id, request, result, user.id, timestamp),
+            paramcad_response_to_history_row(job_id, request, result, user.id, timestamp, step_storage_url),
             auth_header,
         )
     return result

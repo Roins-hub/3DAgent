@@ -42,3 +42,26 @@ test("buildCadamPreviewHref maps generation results to the preview page", () => 
     "/industrial/cadam/preview?title=bearing+mount&geometry=bearing_mount&step=bearing.step&source=bearing.py&provider=cad-script-engine&model=build123d",
   );
 });
+
+test("buildParamcadOutputUrl avoids double /api prefixes on deployed same-origin routes", () => {
+  const { buildParamcadOutputUrl, buildParamcadPreviewUrl } = loadCadamRouting();
+
+  assert.equal(
+    buildParamcadOutputUrl("/api", "bearing mount.step"),
+    "/api/paramcad/outputs/bearing%20mount.step",
+  );
+  assert.equal(
+    buildParamcadPreviewUrl("/api/", "bearing.step"),
+    "/api/paramcad/outputs/bearing.step/preview.stl",
+  );
+});
+
+test("buildParamcadOutputUrl supports empty and absolute API bases", () => {
+  const { buildParamcadOutputUrl } = loadCadamRouting();
+
+  assert.equal(buildParamcadOutputUrl("", "bearing.step"), "/api/paramcad/outputs/bearing.step");
+  assert.equal(
+    buildParamcadOutputUrl("https://ai.hhlai.xyz", "bearing.step"),
+    "https://ai.hhlai.xyz/api/paramcad/outputs/bearing.step",
+  );
+});

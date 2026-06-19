@@ -6,8 +6,10 @@ dist
 *.tsbuildinfo
 apps/api/generated
 apps/api/build
+apps/api/*.log
 apps/api/*.spec
 apps/desktop/resources
+supabase/.temp
 .env
 .env.local
 SecretKey.csv

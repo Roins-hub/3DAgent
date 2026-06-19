@@ -17,6 +17,7 @@
     "lint": "npm --workspace @3dagent/web run lint && npm --workspace @3dagent/admin run lint",
     "build": "npm --workspace @3dagent/web run build && npm --workspace @3dagent/admin run build",
     "build:web": "npm --workspace @3dagent/web run build",
+    "prepare:web-standalone": "node scripts/prepare-web-standalone.mjs",
     "build:admin": "npm --workspace @3dagent/admin run build"
   },
   "engines": {
@@ -25,6 +26,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "supabase": "^2.105.0"
   }
 }

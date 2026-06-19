@@ -1,5 +1,6 @@
 import { AuthGate } from "@/components/auth/AuthGate";
 import { API_BASE_URL } from "@/lib/api";
+import { buildParamcadOutputUrl, buildParamcadPreviewUrl } from "@/lib/cadam-routing";
 import { CadamPreviewClient } from "./CadamPreviewClient";
 
 type PreviewPageProps = {
@@ -21,10 +22,8 @@ export default async function CadamPreviewPage({ searchParams }: PreviewPageProp
   const model = params.model || "build123d";
   const stepFile = params.step || "";
   const sourceFile = params.source || "";
-  const stepUrl = stepFile ? `${API_BASE_URL}/api/paramcad/outputs/${encodeURIComponent(stepFile)}` : "";
-  const previewUrl = stepFile
-    ? `${API_BASE_URL}/api/paramcad/outputs/${encodeURIComponent(stepFile)}/preview.stl`
-    : "";
+  const stepUrl = stepFile ? buildParamcadOutputUrl(API_BASE_URL, stepFile) : "";
+  const previewUrl = stepFile ? buildParamcadPreviewUrl(API_BASE_URL, stepFile) : "";
 
   return (
     <AuthGate>

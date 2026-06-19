@@ -22,3 +22,20 @@ export function buildCadamPreviewHref(result: CadamPreviewResult) {
   params.set("model", result.model);
   return `/industrial/cadam/preview?${params.toString()}`;
 }
+
+function apiUrlPrefix(apiBaseUrl: string) {
+  const value = apiBaseUrl.trim();
+  if (!value || value === "/api" || value === "/api/") {
+    return "";
+  }
+  return value.endsWith("/") ? value.slice(0, -1) : value;
+}
+
+export function buildParamcadOutputUrl(apiBaseUrl: string, stepFile: string) {
+  const prefix = apiUrlPrefix(apiBaseUrl);
+  return `${prefix}/api/paramcad/outputs/${encodeURIComponent(stepFile)}`;
+}
+
+export function buildParamcadPreviewUrl(apiBaseUrl: string, stepFile: string) {
+  return `${buildParamcadOutputUrl(apiBaseUrl, stepFile)}/preview.stl`;
+}

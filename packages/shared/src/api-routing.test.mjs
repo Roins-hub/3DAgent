@@ -52,3 +52,13 @@ test("does not add desktop fallback for deployed pages", () => {
 test("uses same-origin API for deployed pages when no API base URL is configured", () => {
   assert.deepEqual(apiBaseUrlCandidates("", "ai.hhlai.xyz"), [""]);
 });
+
+test("ignores loopback API URLs for deployed pages", () => {
+  assert.deepEqual(apiBaseUrlCandidates("http://localhost:8016", "ai.hhlai.xyz"), [""]);
+  assert.deepEqual(apiBaseUrlCandidates("http://127.0.0.1:8016", "ai.hhlai.xyz"), [""]);
+});
+
+test("treats /api config as same-origin API prefix", () => {
+  assert.deepEqual(apiBaseUrlCandidates("/api", "ai.hhlai.xyz"), [""]);
+  assert.deepEqual(apiBaseUrlCandidates("/api/", "localhost"), [""]);
+});

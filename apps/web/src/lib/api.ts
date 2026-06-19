@@ -5,12 +5,10 @@ import type {
   ImageJob,
   JobStatus,
 } from "@3dagent/shared";
-import { apiBaseUrlCandidates, normalizeApiBaseUrl } from "@3dagent/shared";
+import { apiBaseUrlCandidates } from "@3dagent/shared";
 import { getAuthHeaders } from "@/lib/supabase";
 
-export const API_BASE_URL = normalizeApiBaseUrl(process.env.NEXT_PUBLIC_API_BASE_URL);
 const configuredApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
-let activeApiBaseUrl = API_BASE_URL;
 
 export function createClientRequestId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -40,13 +38,26 @@ function apiBaseUrls() {
   return apiBaseUrlCandidates(configuredApiBaseUrl, browserHostname(), isDesktopApp());
 }
 
+function initialApiBaseUrl() {
+  return apiBaseUrls()[0] ?? "";
+}
+
+let activeApiBaseUrl = initialApiBaseUrl();
+export const API_BASE_URL = activeApiBaseUrl || "/api";
+
 function apiUrl(path: string, baseUrl = activeApiBaseUrl) {
   return `${baseUrl}${path}`;
 }
 
-function connectionErrorMessage(error: unknown) {
+function legacyConnectionErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : "";
   return `无法连接后端服务 ${apiBaseUrls().join(" 或 ")}。请确认 FastAPI 已启动。${message ? `（${message}）` : ""}`;
+}
+
+function connectionErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+  const candidates = apiBaseUrls().map((baseUrl) => baseUrl || "/api").join(" 或 ");
+  return `无法连接后端服务 ${candidates}。请确认 FastAPI 已启动。${message ? `（${message}）` : ""}`;
 }
 
 function formatApiError(status: number, detail: unknown) {

@@ -57,6 +57,15 @@ test("formatAuthErrorMessage explains disabled Supabase signups", () => {
   );
 });
 
+test("formatAuthErrorMessage explains Supabase fetch failures", () => {
+  const { formatAuthErrorMessage } = loadAuthUtils();
+
+  assert.equal(
+    formatAuthErrorMessage(new TypeError("Failed to fetch"), "send-login-code"),
+    "无法连接到 Supabase，请检查网络、代理或稍后重试。",
+  );
+});
+
 test("login OTP explicitly allows creating new users", () => {
   const sourcePath = path.join(__dirname, "..", "components", "auth", "LoginShell.tsx");
   const source = fs.readFileSync(sourcePath, "utf8");

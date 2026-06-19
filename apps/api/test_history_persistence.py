@@ -272,6 +272,35 @@ class HistoryPersistenceTests(unittest.TestCase):
         self.assertEqual(post.call_args.kwargs["headers"]["Content-Type"], "model/gltf-binary")
         self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer service-role")
 
+    def test_upload_paramcad_step_file_stores_step_in_generation_assets(self):
+        with test_env({"SUPABASE_SERVICE_ROLE_KEY": "service-role"}):
+            api = load_api()
+            response = response_mock({}, 200)
+            with tempfile.TemporaryDirectory() as temp_dir:
+                output_dir = api.Path(temp_dir)
+                step_path = output_dir / "spindle.step"
+                step_path.write_bytes(b"ISO-10303-21;")
+                with (
+                    patch.object(api, "cad_script_output_dir", return_value=output_dir),
+                    patch.object(api.requests, "post", return_value=response) as post,
+                ):
+                    stored_url = api.upload_paramcad_step_file(
+                        "88888888-8888-8888-8888-888888888888",
+                        "spindle.step",
+                    )
+
+        self.assertEqual(
+            stored_url,
+            "supabase-storage://generation-assets/paramcad-jobs/88888888-8888-8888-8888-888888888888.step",
+        )
+        self.assertEqual(
+            post.call_args.args[0],
+            "https://example.supabase.co/storage/v1/object/generation-assets/paramcad-jobs/88888888-8888-8888-8888-888888888888.step",
+        )
+        self.assertEqual(post.call_args.kwargs["headers"]["Content-Type"], "application/step")
+        self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer service-role")
+        self.assertEqual(post.call_args.kwargs["data"], b"ISO-10303-21;")
+
     def test_persist_remote_model_converts_obj_zip_before_uploading_glb(self):
         with test_env({"SUPABASE_SERVICE_ROLE_KEY": "service-role"}):
             api = load_api()

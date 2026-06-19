@@ -1,20 +1,24 @@
 import { supabase } from "./supabase";
-import { apiBaseUrlCandidates, normalizeApiBaseUrl } from "@3dagent/shared";
-export const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL || import.meta.env.NEXT_PUBLIC_API_BASE_URL);
+import { apiBaseUrlCandidates } from "@3dagent/shared";
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.NEXT_PUBLIC_API_BASE_URL;
-let activeApiBaseUrl = API_BASE_URL;
 function browserHostname() {
     return typeof window === "undefined" ? undefined : window.location.hostname;
 }
 function apiBaseUrls() {
     return apiBaseUrlCandidates(configuredApiBaseUrl, browserHostname());
 }
+function initialApiBaseUrl() {
+    return apiBaseUrls()[0] ?? "";
+}
+let activeApiBaseUrl = initialApiBaseUrl();
+export const API_BASE_URL = activeApiBaseUrl || "/api";
 function apiUrl(path, baseUrl = activeApiBaseUrl) {
     return `${baseUrl}${path}`;
 }
 function connectionErrorMessage(error) {
     const message = error instanceof Error ? error.message : "";
-    return `Cannot connect to backend ${apiBaseUrls().join(" or ")}. Please confirm FastAPI is running.${message ? ` (${message})` : ""}`;
+    const candidates = apiBaseUrls().map((baseUrl) => baseUrl || "/api").join(" 或 ");
+    return `无法连接后端服务 ${candidates}。请确认 FastAPI 已启动。${message ? `（${message}）` : ""}`;
 }
 async function getAuthHeaders() {
     const { data: { session }, } = await supabase.auth.getSession();
