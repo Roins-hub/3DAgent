@@ -1,7 +1,7 @@
 import importlib
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import DEFAULT, patch
 
 
 def test_env(extra_env=None):
@@ -74,6 +74,7 @@ class HunyuanConfigTests(unittest.TestCase):
         self.assertEqual(submit_headers["X-TC-Timestamp"], "1779500000")
         self.assertIn("TC3-HMAC-SHA256 Credential=secret-id/", submit_headers["Authorization"])
         self.assertIn("/ai3d/tc3_request", submit_headers["Authorization"])
+        self.assertEqual(submit_call.kwargs["timeout"], (30, 180))
         self.assertEqual(
             api.json.loads(submit_call.kwargs["data"].decode("utf-8")),
             {
@@ -113,6 +114,40 @@ class HunyuanConfigTests(unittest.TestCase):
             api.json.loads(post.call_args.kwargs["data"].decode("utf-8"))["ResultFormat"],
             "STL",
         )
+
+    def test_hunyuan_request_retries_transient_timeout(self):
+        with test_env():
+            api = load_api()
+
+            with patch.object(api.requests, "post") as post:
+                post.side_effect = [
+                    api.requests.exceptions.Timeout("write operation timed out"),
+                    DEFAULT,
+                ]
+                post.return_value.status_code = 200
+                post.return_value.json.return_value = {
+                    "Response": {"JobId": "job-1", "RequestId": "request-1"},
+                }
+
+                result = api.call_tencentcloud_hunyuan("SubmitHunyuanTo3DProJob", {"Prompt": "bolt"})
+
+        self.assertEqual(result["JobId"], "job-1")
+        self.assertEqual(post.call_count, 2)
+
+    def test_hunyuan_timeout_error_is_user_readable(self):
+        with test_env({"TENCENTCLOUD_HUNYUAN_REQUEST_RETRIES": "1"}):
+            api = load_api()
+
+            with patch.object(
+                api.requests,
+                "post",
+                side_effect=api.requests.exceptions.Timeout("write operation timed out"),
+            ):
+                with self.assertRaises(RuntimeError) as exc:
+                    api.call_tencentcloud_hunyuan("SubmitHunyuanTo3DProJob", {"Prompt": "bolt"})
+
+        self.assertIn("腾讯云混元生3D接口请求超时", str(exc.exception))
+        self.assertIn("TENCENTCLOUD_HUNYUAN_READ_TIMEOUT_SECONDS", str(exc.exception))
 
     def test_hunyuan_model_url_reads_tokenhub_data(self):
         with test_env():

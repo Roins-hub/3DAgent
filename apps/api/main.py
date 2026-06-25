@@ -38,6 +38,9 @@ TENCENTCLOUD_HUNYUAN_DEFAULT_ENDPOINT = "ai3d.tencentcloudapi.com"
 TENCENTCLOUD_HUNYUAN_DEFAULT_VERSION = "2025-05-13"
 TENCENTCLOUD_HUNYUAN_DEFAULT_REGION = "ap-guangzhou"
 TENCENTCLOUD_HUNYUAN_DEFAULT_MODEL = "3.1"
+TENCENTCLOUD_HUNYUAN_CONNECT_TIMEOUT_SECONDS = 30
+TENCENTCLOUD_HUNYUAN_READ_TIMEOUT_SECONDS = 180
+TENCENTCLOUD_HUNYUAN_REQUEST_RETRIES = 2
 SILICONFLOW_DEFAULT_IMAGE_MODEL = "Kwai-Kolors/Kolors"
 SILICONFLOW_IMAGE_TIMEOUT_SECONDS = 180
 OPENAI_DEFAULT_IMAGE_MODEL = "gpt-image-2"
@@ -82,6 +85,9 @@ ADMIN_VISIBLE_SETTING_KEYS = [
     "MIMO_API_KEY",
     "TENCENTCLOUD_SECRET_ID",
     "TENCENTCLOUD_SECRET_KEY",
+    "TENCENTCLOUD_HUNYUAN_CONNECT_TIMEOUT_SECONDS",
+    "TENCENTCLOUD_HUNYUAN_READ_TIMEOUT_SECONDS",
+    "TENCENTCLOUD_HUNYUAN_REQUEST_RETRIES",
 ]
 
 
@@ -2702,6 +2708,40 @@ def tencentcloud_hunyuan_model() -> str:
     )
 
 
+def positive_int_runtime_setting(key: str, default: int, minimum: int = 1, maximum: int = 600) -> int:
+    raw_value = runtime_setting_value(key, str(default)).strip()
+    try:
+        value = int(raw_value)
+    except ValueError:
+        return default
+    return max(minimum, min(maximum, value))
+
+
+def tencentcloud_hunyuan_timeout() -> tuple[int, int]:
+    connect_timeout = positive_int_runtime_setting(
+        "TENCENTCLOUD_HUNYUAN_CONNECT_TIMEOUT_SECONDS",
+        TENCENTCLOUD_HUNYUAN_CONNECT_TIMEOUT_SECONDS,
+        minimum=5,
+        maximum=120,
+    )
+    read_timeout = positive_int_runtime_setting(
+        "TENCENTCLOUD_HUNYUAN_READ_TIMEOUT_SECONDS",
+        TENCENTCLOUD_HUNYUAN_READ_TIMEOUT_SECONDS,
+        minimum=30,
+        maximum=600,
+    )
+    return connect_timeout, read_timeout
+
+
+def tencentcloud_hunyuan_request_retries() -> int:
+    return positive_int_runtime_setting(
+        "TENCENTCLOUD_HUNYUAN_REQUEST_RETRIES",
+        TENCENTCLOUD_HUNYUAN_REQUEST_RETRIES,
+        minimum=1,
+        maximum=5,
+    )
+
+
 def tencentcloud_hunyuan_submit_action() -> str:
     return (
         runtime_setting_value(
@@ -2802,12 +2842,33 @@ def tencentcloud_tc3_headers(action: str, payload: dict[str, Any]) -> dict[str, 
 
 def call_tencentcloud_hunyuan(action: str, payload: dict[str, Any]) -> dict[str, Any]:
     payload_json = tencentcloud_payload_json(payload)
-    response = requests.post(
-        f"https://{tencentcloud_hunyuan_endpoint()}/",
-        headers=tencentcloud_tc3_headers(action, payload),
-        data=payload_json.encode("utf-8"),
-        timeout=60,
-    )
+    endpoint = tencentcloud_hunyuan_endpoint()
+    retries = tencentcloud_hunyuan_request_retries()
+    last_timeout: requests.Timeout | None = None
+    for attempt in range(retries):
+        try:
+            response = requests.post(
+                f"https://{endpoint}/",
+                headers=tencentcloud_tc3_headers(action, payload),
+                data=payload_json.encode("utf-8"),
+                timeout=tencentcloud_hunyuan_timeout(),
+            )
+            break
+        except requests.Timeout as exc:
+            last_timeout = exc
+            if attempt + 1 < retries:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise RuntimeError(
+                "腾讯云混元生3D接口请求超时，请稍后重试；如果连续失败，请检查服务器到 "
+                f"{endpoint} 的网络连通性，或在后台配置中调大 "
+                "TENCENTCLOUD_HUNYUAN_READ_TIMEOUT_SECONDS。"
+            ) from exc
+        except requests.RequestException as exc:
+            raise RuntimeError(f"腾讯云混元生3D接口请求失败：{exc}") from exc
+    else:
+        raise RuntimeError(f"腾讯云混元生3D接口请求超时：{last_timeout}")
+
     try:
         data = response.json()
     except ValueError as exc:
