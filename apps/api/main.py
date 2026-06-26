@@ -451,10 +451,17 @@ def parse_storage_url(value: str) -> tuple[str, str] | None:
 
 
 def file_response_for_model(job: GenerationJob, export_format: TargetFormat, path: Path):
+    headers = {
+        "Cache-Control": "private, max-age=31536000, immutable",
+    }
+    if path.exists():
+        stat = path.stat()
+        headers["ETag"] = f'"{job.id}-{export_format}-{stat.st_size}-{int(stat.st_mtime)}"'
     return FileResponse(
         path,
         media_type=model_media_type(export_format),
         filename=f"{job.id}.{export_format}",
+        headers=headers,
     )
 
 

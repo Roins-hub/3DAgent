@@ -205,6 +205,8 @@ class HistoryPersistenceTests(unittest.TestCase):
 
         self.assertEqual(get.call_count, 1)
         self.assertEqual(first.path, second.path)
+        self.assertEqual(first.headers.get("cache-control"), "private, max-age=31536000, immutable")
+        self.assertIsNotNone(first.headers.get("etag"))
 
     def test_model_download_reads_supabase_storage_url(self):
         with test_env({"SUPABASE_SERVICE_ROLE_KEY": "service-role"}):

@@ -8,6 +8,7 @@ import { Component, Suspense, useEffect, useMemo, useRef, useState } from "react
 import type { ErrorInfo, ReactNode } from "react";
 import { Box3, Vector3 } from "three";
 import type { Group, Mesh, Object3D } from "three";
+import { loadCachedModelBlob } from "@/lib/model-asset-cache";
 import { getAuthHeaders } from "@/lib/supabase";
 
 class ModelErrorBoundary extends Component<
@@ -113,19 +114,17 @@ function AuthenticatedModelAsset({
     async function loadModel() {
       try {
         const startedAt = performance.now();
-        const response = await fetch(url, {
+        const result = await loadCachedModelBlob(url, {
           headers: await getAuthHeaders(),
           signal: controller.signal,
         });
-
-        if (!response.ok) {
-          const body = await response.json().catch(() => null);
-          onError(body?.detail ?? `模型预览加载失败：HTTP ${response.status}`);
-          return;
-        }
-
-        const blob = await response.blob();
-        console.info("模型文件下载完成", Math.round(performance.now() - startedAt), "ms");
+        const blob = result.blob;
+        console.info(
+          "模型文件加载完成",
+          Math.round(performance.now() - startedAt),
+          "ms",
+          result.fromCache ? "cache" : "network",
+        );
         nextObjectUrl = window.URL.createObjectURL(blob);
         setAssetState({ sourceUrl: url, objectUrl: nextObjectUrl });
       } catch (error) {
