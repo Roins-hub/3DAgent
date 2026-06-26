@@ -79,7 +79,12 @@ class HunyuanConfigTests(unittest.TestCase):
             api.json.loads(submit_call.kwargs["data"].decode("utf-8")),
             {
                 "Model": "3.1",
-                "Prompt": "Generate a ceramic mug",
+                "Prompt": (
+                    "Generate a ceramic mug\n\n"
+                    "材质与贴图要求：生成带 PBR 材质贴图的 GLB 模型，包含清晰的 base color、"
+                    "roughness/metallic 材质表现，避免纯白或无材质模型；机械零件需要金属、橡胶、"
+                    "塑料或陶瓷等材质分区，并用细微表面纹理、磨砂、拉丝、倒角高光增强真实感。"
+                ),
                 "EnablePBR": True,
             },
         )
@@ -113,6 +118,30 @@ class HunyuanConfigTests(unittest.TestCase):
         self.assertEqual(
             api.json.loads(post.call_args.kwargs["data"].decode("utf-8"))["ResultFormat"],
             "STL",
+        )
+
+    def test_hunyuan_texture_prompt_suffix_can_be_configured(self):
+        with test_env({"TENCENTCLOUD_HUNYUAN_TEXTURE_PROMPT_SUFFIX": "Use brushed steel PBR textures."}):
+            api = load_api()
+            request = api.CreateJobRequest(
+                prompt="Generate a bearing",
+                mode="text-to-3d",
+                quality="balanced",
+                style="game-ready",
+                targetFormat="glb",
+            )
+
+            with patch.object(api.requests, "post") as post:
+                post.return_value.status_code = 200
+                post.return_value.json.return_value = {
+                    "Response": {"JobId": "job-1", "RequestId": "request-1"},
+                }
+                api.create_hunyuan_task(request)
+
+        payload = api.json.loads(post.call_args.kwargs["data"].decode("utf-8"))
+        self.assertEqual(
+            payload["Prompt"],
+            "Generate a bearing\n\nUse brushed steel PBR textures.",
         )
 
     def test_hunyuan_request_retries_transient_timeout(self):

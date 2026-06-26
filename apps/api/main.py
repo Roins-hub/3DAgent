@@ -41,6 +41,11 @@ TENCENTCLOUD_HUNYUAN_DEFAULT_MODEL = "3.1"
 TENCENTCLOUD_HUNYUAN_CONNECT_TIMEOUT_SECONDS = 30
 TENCENTCLOUD_HUNYUAN_READ_TIMEOUT_SECONDS = 180
 TENCENTCLOUD_HUNYUAN_REQUEST_RETRIES = 2
+TENCENTCLOUD_HUNYUAN_TEXTURE_PROMPT_SUFFIX = (
+    "材质与贴图要求：生成带 PBR 材质贴图的 GLB 模型，包含清晰的 base color、"
+    "roughness/metallic 材质表现，避免纯白或无材质模型；机械零件需要金属、橡胶、"
+    "塑料或陶瓷等材质分区，并用细微表面纹理、磨砂、拉丝、倒角高光增强真实感。"
+)
 SILICONFLOW_DEFAULT_IMAGE_MODEL = "Kwai-Kolors/Kolors"
 SILICONFLOW_IMAGE_TIMEOUT_SECONDS = 180
 OPENAI_DEFAULT_IMAGE_MODEL = "gpt-image-2"
@@ -88,6 +93,7 @@ ADMIN_VISIBLE_SETTING_KEYS = [
     "TENCENTCLOUD_HUNYUAN_CONNECT_TIMEOUT_SECONDS",
     "TENCENTCLOUD_HUNYUAN_READ_TIMEOUT_SECONDS",
     "TENCENTCLOUD_HUNYUAN_REQUEST_RETRIES",
+    "TENCENTCLOUD_HUNYUAN_TEXTURE_PROMPT_SUFFIX",
 ]
 
 
@@ -2715,6 +2721,21 @@ def tencentcloud_hunyuan_model() -> str:
     )
 
 
+def tencentcloud_hunyuan_texture_prompt_suffix() -> str:
+    return runtime_setting_value(
+        "TENCENTCLOUD_HUNYUAN_TEXTURE_PROMPT_SUFFIX",
+        TENCENTCLOUD_HUNYUAN_TEXTURE_PROMPT_SUFFIX,
+    ).strip()
+
+
+def hunyuan_prompt(request: CreateJobRequest) -> str:
+    prompt = request.prompt.strip()
+    suffix = tencentcloud_hunyuan_texture_prompt_suffix()
+    if not suffix:
+        return prompt
+    return f"{prompt}\n\n{suffix}"
+
+
 def positive_int_runtime_setting(key: str, default: int, minimum: int = 1, maximum: int = 600) -> int:
     raw_value = runtime_setting_value(key, str(default)).strip()
     try:
@@ -2904,7 +2925,7 @@ def hunyuan_result_format(target_format: TargetFormat) -> str:
 def create_hunyuan_task(request: CreateJobRequest) -> str:
     payload: dict[str, Any] = {
         "Model": tencentcloud_hunyuan_model(),
-        "Prompt": request.prompt.strip(),
+        "Prompt": hunyuan_prompt(request),
         "EnablePBR": True,
     }
     result_format = tencentcloud_hunyuan_result_format(request.targetFormat)
