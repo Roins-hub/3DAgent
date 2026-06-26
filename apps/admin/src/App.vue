@@ -184,6 +184,21 @@ const jobFilters = reactive({
   search: "",
   includeDeleted: false,
 });
+const jobPagination = reactive({
+  page: 1,
+  pageSize: 20,
+  pageSizes: [20, 30, 50],
+  showSizePicker: true,
+  prefix: ({ itemCount }: { itemCount: number | undefined }) =>
+    `共 ${itemCount ?? jobs.value.length} 条`,
+  onUpdatePage: (page: number) => {
+    jobPagination.page = page;
+  },
+  onUpdatePageSize: (pageSize: number) => {
+    jobPagination.pageSize = pageSize;
+    jobPagination.page = 1;
+  },
+});
 const formValues = reactive<Record<string, string>>({});
 const visibleSecrets = reactive<Record<string, boolean>>({});
 const confirmState = reactive<{
@@ -296,6 +311,7 @@ async function loadUsers() {
 }
 
 async function loadJobs() {
+  jobPagination.page = 1;
   jobs.value = (
     await adminApi.jobs({
       kind: jobFilters.kind || undefined,
@@ -815,11 +831,11 @@ onMounted(async () => {
                   <NButton type="primary" secondary @click="loadJobs">筛选</NButton>
                 </div>
                 <NDataTable
+                  class="jobs-table"
                   :columns="jobColumns"
                   :data="jobs"
-                  :pagination="{ pageSize: 12 }"
+                  :pagination="jobPagination"
                   :bordered="false"
-                  remote
                 />
               </NCard>
             </section>
