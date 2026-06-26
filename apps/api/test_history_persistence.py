@@ -168,6 +168,44 @@ class HistoryPersistenceTests(unittest.TestCase):
 
         self.assertEqual(result, job)
 
+    def test_admin_job_response_includes_user_email_when_available(self):
+        with test_env():
+            api = load_api()
+
+        result = api.admin_job_response(
+            {
+                "id": "job-1",
+                "user_id": "user-1",
+                "kind": "3d",
+                "prompt": "Generate a bearing",
+                "status": "completed",
+                "progress": 100,
+                "created_at": "2026-04-28T00:00:00+00:00",
+                "updated_at": "2026-04-28T00:01:00+00:00",
+            },
+            {"user-1": "maker@example.com"},
+        )
+
+        self.assertEqual(result["userId"], "user-1")
+        self.assertEqual(result["userEmail"], "maker@example.com")
+
+    def test_admin_generation_search_matches_user_email(self):
+        with test_env():
+            api = load_api()
+
+        rows = [
+            {"id": "job-1", "user_id": "user-1", "prompt": "Generate a bearing"},
+            {"id": "job-2", "user_id": "user-2", "prompt": "Generate a bracket"},
+        ]
+
+        result = api.filter_admin_generation_rows_by_search(
+            rows,
+            "maker@example.com",
+            {"user-1": "maker@example.com", "user-2": "other@example.com"},
+        )
+
+        self.assertEqual([row["id"] for row in result], ["job-1"])
+
     def test_model_download_uses_disk_cache_after_first_remote_fetch(self):
         with test_env():
             api = load_api()

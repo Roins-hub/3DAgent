@@ -464,7 +464,7 @@ function JobsTable({
                 <strong>{jobKindLabel(job.kind)} · {job.prompt}</strong>
                 <small>{job.id}</small>
               </td>
-              <td>{job.userId}</td>
+              <td title={job.userId}>{job.userEmail ?? job.userId}</td>
               <td><span className={job.status === "failed" ? "admin-badge danger" : "admin-badge"}>{statusLabel(job.status)} · {job.progress}%</span></td>
               <td>{formatDate(job.createdAt)}</td>
               {!compact && (

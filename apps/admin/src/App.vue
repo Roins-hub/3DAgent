@@ -540,9 +540,10 @@ const jobColumns: DataTableColumns<AdminGenerationJob> = [
   },
   {
     title: "用户",
-    key: "userId",
-    width: 130,
-    render: (row) => shortId(row.userId),
+    key: "userEmail",
+    width: 220,
+    ellipsis: { tooltip: true },
+    render: (row) => row.userEmail ?? shortId(row.userId),
   },
   {
     title: "创建时间",
@@ -795,7 +796,7 @@ onMounted(async () => {
                 <div class="toolbar">
                   <NInput
                     v-model:value="jobFilters.search"
-                    placeholder="搜索 prompt / 用户 ID"
+                    placeholder="搜索 prompt / 用户邮箱 / 用户 ID"
                     clearable
                   />
                   <NSelect

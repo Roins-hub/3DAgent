@@ -126,6 +126,7 @@ export interface AdminUser {
 export interface AdminGenerationJob {
   id: string;
   userId: string;
+  userEmail: string | null;
   kind: "3d" | "image" | "cadam" | "paramcad";
   prompt: string;
   mode: string | null;

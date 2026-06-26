@@ -2405,10 +2405,54 @@ def admin_list_generation_rows(
     return data if isinstance(data, list) else []
 
 
-def admin_job_response(row: dict[str, Any]) -> dict[str, Any]:
+def raw_admin_users_from_payload(payload: Any) -> list[dict[str, Any]]:
+    raw_users = payload.get("users") if isinstance(payload, dict) else payload
+    return [item for item in raw_users if isinstance(item, dict)] if isinstance(raw_users, list) else []
+
+
+def admin_user_email_map(users: list[dict[str, Any]]) -> dict[str, str]:
+    email_by_id: dict[str, str] = {}
+    for user in users:
+        user_id = user.get("id")
+        email = user.get("email")
+        if isinstance(user_id, str) and user_id and isinstance(email, str) and email:
+            email_by_id[user_id] = email
+    return email_by_id
+
+
+def filter_admin_generation_rows_by_search(
+    rows: list[dict[str, Any]],
+    search: str | None,
+    user_emails: dict[str, str],
+) -> list[dict[str, Any]]:
+    query = (search or "").strip().lower()
+    if not query:
+        return rows
+
+    matched_rows: list[dict[str, Any]] = []
+    for row in rows:
+        user_id = row.get("user_id")
+        user_email = user_emails.get(user_id) if isinstance(user_id, str) else None
+        searchable_values = [
+            row.get("prompt"),
+            user_id,
+            user_email,
+        ]
+        if any(query in str(value).lower() for value in searchable_values if value):
+            matched_rows.append(row)
+    return matched_rows
+
+
+def admin_job_response(
+    row: dict[str, Any],
+    user_emails: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    user_id = row.get("user_id")
+    user_email = user_emails.get(user_id) if isinstance(user_id, str) and user_emails else None
     return {
         "id": row.get("id"),
-        "userId": row.get("user_id"),
+        "userId": user_id,
+        "userEmail": user_email,
         "kind": row.get("kind"),
         "prompt": row.get("prompt"),
         "mode": row.get("mode"),
@@ -3800,9 +3844,8 @@ async def admin_summary(authorization: str | None = Header(default=None)) -> Adm
         asyncio.to_thread(supabase_admin_request, "GET", "/auth/v1/admin/users"),
         asyncio.to_thread(admin_list_generation_rows, include_deleted=True, limit=500),
     )
-    users_payload = users_response.json()
-    raw_users = users_payload.get("users") if isinstance(users_payload, dict) else users_payload
-    users = raw_users if isinstance(raw_users, list) else []
+    users = raw_admin_users_from_payload(users_response.json())
+    user_emails = admin_user_email_map(users)
     failed_jobs = sum(1 for row in rows if row.get("status") == "failed")
     running_jobs = sum(1 for row in rows if row.get("status") in {"queued", "running", "postprocessing"})
     completed_jobs = sum(1 for row in rows if row.get("status") == "completed")
@@ -3816,7 +3859,7 @@ async def admin_summary(authorization: str | None = Header(default=None)) -> Adm
         failedJobs=failed_jobs,
         runningJobs=running_jobs,
         completedJobs=completed_jobs,
-        recentJobs=[admin_job_response(row) for row in rows[:8]],
+        recentJobs=[admin_job_response(row, user_emails) for row in rows[:8]],
     )
 
 
@@ -3824,9 +3867,7 @@ async def admin_summary(authorization: str | None = Header(default=None)) -> Adm
 async def admin_list_users(authorization: str | None = Header(default=None)) -> AdminUsersResponse:
     verify_admin_user(authorization)
     response = supabase_admin_request("GET", "/auth/v1/admin/users")
-    payload = response.json()
-    raw_users = payload.get("users") if isinstance(payload, dict) else payload
-    users = [admin_user_from_payload(item) for item in raw_users if isinstance(item, dict)] if isinstance(raw_users, list) else []
+    users = [admin_user_from_payload(item) for item in raw_admin_users_from_payload(response.json())]
     return AdminUsersResponse(users=users)
 
 
@@ -3869,13 +3910,19 @@ async def admin_list_generation_jobs(
     authorization: str | None = Header(default=None),
 ) -> dict[str, list[dict[str, Any]]]:
     verify_admin_user(authorization)
-    rows = admin_list_generation_rows(
-        kind=kind,
-        status=status,
-        search=search,
-        include_deleted=includeDeleted,
+    users_response, rows = await asyncio.gather(
+        asyncio.to_thread(supabase_admin_request, "GET", "/auth/v1/admin/users"),
+        asyncio.to_thread(
+            admin_list_generation_rows,
+            kind=kind,
+            status=status,
+            include_deleted=includeDeleted,
+            limit=500,
+        ),
     )
-    return {"jobs": [admin_job_response(row) for row in rows]}
+    user_emails = admin_user_email_map(raw_admin_users_from_payload(users_response.json()))
+    rows = filter_admin_generation_rows_by_search(rows, search, user_emails)
+    return {"jobs": [admin_job_response(row, user_emails) for row in rows]}
 
 
 def retry_admin_generation(row: dict[str, Any], admin: AuthUser) -> dict[str, Any]:
