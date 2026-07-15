@@ -909,6 +909,77 @@ def help_system_prompt() -> str:
     )
 
 
+def help_chat_provider() -> str:
+    return runtime_setting_value("HELP_CHAT_PROVIDER", "deepseek").strip().lower() or "deepseek"
+
+
+def help_chat_model() -> str:
+    return runtime_setting_value("HELP_CHAT_MODEL", "deepseek-v4-pro").strip() or "deepseek-v4-pro"
+
+
+def deepseek_base_url() -> str:
+    return (
+        runtime_setting_value("DEEPSEEK_BASE_URL", "https://api.deepseek.com").strip().rstrip("/")
+        or "https://api.deepseek.com"
+    )
+
+
+def deepseek_help_headers() -> dict[str, str]:
+    api_key = runtime_setting_value("DEEPSEEK_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="DeepSeek API key is not configured.")
+    return {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+
+def build_deepseek_help_chat_payload(request: HelpChatRequest) -> dict[str, Any]:
+    messages = [{"role": "system", "content": help_system_prompt()}]
+    messages.extend(
+        {"role": message.role, "content": content}
+        for message in request.messages[-16:]
+        if (content := message.content.strip())
+    )
+    return {
+        "model": help_chat_model(),
+        "messages": messages,
+        "max_tokens": 2048,
+        "temperature": 0.4,
+        "top_p": 0.9,
+        "stream": False,
+    }
+
+
+def call_deepseek_help_chat(request: HelpChatRequest) -> str:
+    try:
+        response = requests.post(
+            f"{deepseek_base_url()}/chat/completions",
+            headers=deepseek_help_headers(),
+            json=build_deepseek_help_chat_payload(request),
+            timeout=60,
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=503, detail="DeepSeek help chat is unavailable.") from exc
+
+    if response.status_code >= 400:
+        raise HTTPException(status_code=502, detail="DeepSeek help chat request failed.")
+
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="DeepSeek returned an invalid response.") from exc
+
+    choices = data.get("choices") if isinstance(data, dict) else None
+    first_choice = choices[0] if isinstance(choices, list) and choices else None
+    message = first_choice.get("message") if isinstance(first_choice, dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, str) or not content.strip():
+        raise HTTPException(status_code=502, detail="DeepSeek returned an invalid response.")
+
+    return content.strip()
+
+
 def build_help_reply(request: HelpChatRequest) -> str:
     latest_user_message = next(
         (
