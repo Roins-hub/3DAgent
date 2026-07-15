@@ -1,11 +1,14 @@
 import asyncio
 import importlib
 import json
+from pathlib import Path
+import tempfile
 import threading
 import unittest
 from unittest.mock import Mock, patch
 
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 
 def load_api():
@@ -117,6 +120,126 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
         self.assertTrue(secret.isConfigured)
         serialized = api.AdminSettingsResponse(settings=[secret]).model_dump(mode="json")
         self.assertIsNone(serialized["settings"][0]["value"])
+
+    def test_admin_settings_round_trip_preserves_hidden_deepseek_key(self):
+        api = load_api()
+        stored = {
+            "HELP_CHAT_MODEL": {
+                "key": "HELP_CHAT_MODEL",
+                "value": "deepseek-v4-pro",
+                "is_secret": False,
+                "updated_at": None,
+            },
+            "DEEPSEEK_API_KEY": {
+                "key": "DEEPSEEK_API_KEY",
+                "value": "existing-deepseek-key",
+                "is_secret": True,
+                "updated_at": None,
+            },
+        }
+
+        def fake_admin_request(method, path, **kwargs):
+            if method == "GET" and path.startswith("admin_settings?"):
+                return response_mock(list(stored.values()))
+            if method == "POST" and path == "admin_settings":
+                for row in kwargs["json_body"]:
+                    stored[row["key"]] = dict(row)
+                return response_mock([])
+            if method == "POST" and path == "admin_audit_logs":
+                return response_mock([])
+            raise AssertionError((method, path))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            api.API_ENV_PATH = Path(temp_dir) / ".env"
+            api.API_ENV_PATH.write_text(
+                "HELP_CHAT_MODEL=deepseek-v4-pro\n"
+                "DEEPSEEK_API_KEY=existing-deepseek-key\n",
+                encoding="utf-8",
+            )
+            with (
+                patch.object(
+                    api,
+                    "verify_admin_user",
+                    return_value=api.AuthUser(id="admin-1", email="admin@example.com"),
+                ),
+                patch.object(api, "supabase_admin_request", side_effect=fake_admin_request),
+            ):
+                client = TestClient(api.app)
+                get_response = client.get("/api/admin/settings")
+                config = get_response.json()
+                deepseek_key = next(
+                    item
+                    for item in config["settings"]
+                    if item["key"] == "DEEPSEEK_API_KEY"
+                )
+                self.assertIsNone(deepseek_key["value"])
+
+                next_model = next(
+                    item
+                    for item in config["settings"]
+                    if item["key"] == "HELP_CHAT_MODEL"
+                )
+                next_model["value"] = "deepseek-v4-pro-next"
+                put_response = client.put(
+                    "/api/admin/settings",
+                    json={"settings": config["settings"]},
+                )
+            env_text = api.API_ENV_PATH.read_text(encoding="utf-8")
+
+        self.assertEqual(get_response.status_code, 200)
+        self.assertEqual(put_response.status_code, 200)
+        self.assertEqual(stored["HELP_CHAT_MODEL"]["value"], "deepseek-v4-pro-next")
+        self.assertEqual(stored["DEEPSEEK_API_KEY"]["value"], "existing-deepseek-key")
+        self.assertIn("DEEPSEEK_API_KEY=existing-deepseek-key", env_text)
+
+    def test_admin_settings_put_updates_nonempty_deepseek_key(self):
+        api = load_api()
+        posted_rows = []
+
+        def fake_admin_request(method, path, **kwargs):
+            if method == "POST" and path == "admin_settings":
+                posted_rows.extend(kwargs["json_body"])
+                return response_mock([])
+            if method == "POST" and path == "admin_audit_logs":
+                return response_mock([])
+            if method == "GET" and path.startswith("admin_settings?"):
+                return response_mock(posted_rows)
+            raise AssertionError((method, path))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            api.API_ENV_PATH = Path(temp_dir) / ".env"
+            api.API_ENV_PATH.write_text(
+                "DEEPSEEK_API_KEY=existing-deepseek-key\n",
+                encoding="utf-8",
+            )
+            with (
+                patch.object(
+                    api,
+                    "verify_admin_user",
+                    return_value=api.AuthUser(id="admin-1", email="admin@example.com"),
+                ),
+                patch.object(api, "supabase_admin_request", side_effect=fake_admin_request),
+            ):
+                response = TestClient(api.app).put(
+                    "/api/admin/settings",
+                    json={
+                        "settings": [
+                            {
+                                "key": "DEEPSEEK_API_KEY",
+                                "value": "replacement-deepseek-key",
+                                "isSecret": True,
+                            }
+                        ]
+                    },
+                )
+            env_text = api.API_ENV_PATH.read_text(encoding="utf-8")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            next(row for row in posted_rows if row["key"] == "DEEPSEEK_API_KEY")["value"],
+            "replacement-deepseek-key",
+        )
+        self.assertIn("DEEPSEEK_API_KEY=replacement-deepseek-key", env_text)
 
     def test_dedicated_help_chat_settings_and_key_are_used(self):
         api = load_api()

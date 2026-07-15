@@ -4340,6 +4340,10 @@ async def admin_update_settings(
         }
         for setting in request.settings
         if setting.key.strip()
+        and not (
+            (setting.isSecret or setting.key.strip() in ADMIN_SECRET_KEYS)
+            and not setting.value
+        )
     ]
     if rows:
         update_local_env_file({row["key"]: row["value"] or "" for row in rows})
