@@ -33,6 +33,8 @@ ParamcadPreviewFormat = Literal["stl"]
 GenerationQuality = Literal["draft", "balanced", "production"]
 ImageAspectRatio = Literal["1:1", "16:9", "9:16", "4:3", "3:4"]
 
+_HELP_CHAT_POST_CLEANUP_TASKS: set[asyncio.Task] = set()
+
 MESHY_BASE_URL = "https://api.meshy.ai/openapi/v2/text-to-3d"
 TENCENTCLOUD_HUNYUAN_DEFAULT_ENDPOINT = "ai3d.tencentcloudapi.com"
 TENCENTCLOUD_HUNYUAN_DEFAULT_VERSION = "2025-05-13"
@@ -1927,6 +1929,20 @@ def _next_help_chat_stream_line(iterator):
         return False, None
 
 
+def _close_late_help_chat_response(task: asyncio.Task) -> None:
+    try:
+        response = task.result()
+    except BaseException:
+        pass
+    else:
+        try:
+            response.close()
+        except Exception:
+            pass
+    finally:
+        _HELP_CHAT_POST_CLEANUP_TASKS.discard(task)
+
+
 def stream_deepseek_help_chat(request: HelpChatRequest):
     reject_deepseek_help_chat_image(request)
     payload = build_deepseek_help_chat_payload(request)
@@ -1937,14 +1953,23 @@ def stream_deepseek_help_chat(request: HelpChatRequest):
     async def generate():
         response = None
         try:
-            response = await asyncio.to_thread(
-                requests.post,
-                url,
-                headers=headers,
-                json=payload,
-                timeout=60,
-                stream=True,
+            post_task = asyncio.create_task(
+                asyncio.to_thread(
+                    requests.post,
+                    url,
+                    headers=headers,
+                    json=payload,
+                    timeout=60,
+                    stream=True,
+                )
             )
+            try:
+                response = await asyncio.shield(post_task)
+            except asyncio.CancelledError:
+                _HELP_CHAT_POST_CLEANUP_TASKS.add(post_task)
+                post_task.add_done_callback(_close_late_help_chat_response)
+                raise
+
             response.raise_for_status()
             line_iterator = response.iter_lines(decode_unicode=False)
 
