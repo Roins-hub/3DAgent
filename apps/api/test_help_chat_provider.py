@@ -1,5 +1,7 @@
 import asyncio
 import importlib
+import json
+import threading
 import unittest
 from unittest.mock import Mock, patch
 
@@ -16,6 +18,60 @@ def response_mock(payload, status_code=200):
     response.status_code = status_code
     response.json.return_value = payload
     return response
+
+
+async def asgi_post(api, path, payload, *, disconnect_after_first_chunk=False):
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    messages = []
+    request_sent = False
+    first_chunk_sent = asyncio.Event()
+
+    async def receive():
+        nonlocal request_sent
+        if not request_sent:
+            request_sent = True
+            return {"type": "http.request", "body": body, "more_body": False}
+        if disconnect_after_first_chunk:
+            await first_chunk_sent.wait()
+            return {"type": "http.disconnect"}
+        await asyncio.Event().wait()
+
+    async def send(message):
+        messages.append(message)
+        if (
+            disconnect_after_first_chunk
+            and message["type"] == "http.response.body"
+            and message.get("body")
+        ):
+            first_chunk_sent.set()
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode("ascii"),
+        "query_string": b"",
+        "root_path": "",
+        "headers": [
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(body)).encode("ascii")),
+        ],
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+    }
+    error = None
+    try:
+        await api.app(scope, receive, send)
+    except BaseException as exc:
+        error = exc
+    return messages, error
+
+
+async def collect_async_stream(stream):
+    return [chunk async for chunk in stream]
 
 
 class DeepSeekHelpChatProviderTests(unittest.TestCase):
@@ -313,7 +369,9 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
             ),
             patch.object(api.requests, "post", return_value=response) as post,
         ):
-            chunks = list(api.stream_deepseek_help_chat(request))
+            chunks = asyncio.run(
+                collect_async_stream(api.stream_deepseek_help_chat(request))
+            )
 
         self.assertEqual(chunks, ["CAD", " 助手"])
         post.assert_called_once()
@@ -345,7 +403,9 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
             ),
             patch.object(api.requests, "post", return_value=response),
         ):
-            chunks = list(api.stream_deepseek_help_chat(request))
+            chunks = asyncio.run(
+                collect_async_stream(api.stream_deepseek_help_chat(request))
+            )
 
         output = "".join(chunks)
         self.assertIn("DeepSeek", output)
@@ -373,11 +433,123 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
                 side_effect=api.requests.ConnectionError(f"{upstream_body} {api_key}"),
             ),
         ):
-            output = "".join(api.stream_deepseek_help_chat(request))
+            output = "".join(
+                asyncio.run(
+                    collect_async_stream(api.stream_deepseek_help_chat(request))
+                )
+            )
 
         self.assertIn("DeepSeek", output)
         self.assertNotIn(api_key, output)
         self.assertNotIn(upstream_body, output)
+
+    def test_stream_deepseek_help_chat_closes_when_iter_lines_raises(self):
+        api = load_api()
+        request = api.HelpChatRequest(
+            messages=[{"role": "user", "content": "Help"}],
+        )
+        api_key = "test-deepseek-key"
+        upstream_body = "broken stream body"
+        response = Mock()
+
+        def broken_lines():
+            yield b'data: {"choices":[{"delta":{"content":"first"}}]}'
+            raise api.requests.ConnectionError(f"{upstream_body} {api_key}")
+
+        response.iter_lines.return_value = broken_lines()
+
+        with (
+            patch.object(
+                api,
+                "deepseek_help_headers",
+                return_value={"Authorization": f"Bearer {api_key}"},
+            ),
+            patch.object(api.requests, "post", return_value=response),
+        ):
+            chunks = asyncio.run(
+                collect_async_stream(api.stream_deepseek_help_chat(request))
+            )
+
+        output = "".join(chunks)
+        self.assertEqual(chunks[0], "first")
+        self.assertNotIn(api_key, output)
+        self.assertNotIn(upstream_body, output)
+        response.close.assert_called_once_with()
+
+    def test_help_chat_stream_missing_key_returns_503_before_response_start(self):
+        api = load_api()
+        payload = {"messages": [{"role": "user", "content": "Help"}]}
+
+        with (
+            patch.object(api, "help_chat_provider", return_value="deepseek"),
+            patch.object(
+                api,
+                "runtime_setting_value",
+                side_effect=lambda key, default="": "" if key == "DEEPSEEK_API_KEY" else default,
+            ),
+            patch.object(api.requests, "post") as post,
+        ):
+            messages, error = asyncio.run(
+                asgi_post(api, "/api/help-chat/stream", payload)
+            )
+
+        self.assertIsNone(error)
+        start = next(message for message in messages if message["type"] == "http.response.start")
+        response_body = b"".join(
+            message.get("body", b"")
+            for message in messages
+            if message["type"] == "http.response.body"
+        )
+        detail = json.loads(response_body)["detail"]
+        self.assertEqual(start["status"], 503)
+        self.assertRegex(detail, "[\\u4e00-\\u9fff]")
+        post.assert_not_called()
+
+    def test_help_chat_stream_disconnect_closes_upstream_response(self):
+        api = load_api()
+        payload = {"messages": [{"role": "user", "content": "Help"}]}
+        close_event = threading.Event()
+        response = Mock()
+
+        class Lines:
+            def __init__(self):
+                self.index = 0
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                self.index += 1
+                if self.index == 1:
+                    return b'data: {"choices":[{"delta":{"content":"first"}}]}'
+                close_event.wait(timeout=1)
+                raise StopIteration
+
+        response.iter_lines.return_value = Lines()
+        response.close.side_effect = close_event.set
+
+        with (
+            patch.object(api, "help_chat_provider", return_value="deepseek"),
+            patch.object(api, "deepseek_help_headers", return_value={}),
+            patch.object(api.requests, "post", return_value=response),
+        ):
+            messages, error = asyncio.run(
+                asgi_post(
+                    api,
+                    "/api/help-chat/stream",
+                    payload,
+                    disconnect_after_first_chunk=True,
+                )
+            )
+
+        self.assertIsNone(error)
+        chunks = [
+            message.get("body", b"")
+            for message in messages
+            if message["type"] == "http.response.body" and message.get("body")
+        ]
+        self.assertIn(b"first", chunks)
+        response.close.assert_called_once_with()
 
     def test_call_help_chat_dispatches_supported_providers_and_rejects_unknown(self):
         api = load_api()

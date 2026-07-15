@@ -1920,47 +1920,68 @@ def stream_mimo_help_chat(request: HelpChatRequest):
         response.close()
 
 
+def _next_help_chat_stream_line(iterator):
+    try:
+        return True, next(iterator)
+    except StopIteration:
+        return False, None
+
+
 def stream_deepseek_help_chat(request: HelpChatRequest):
     reject_deepseek_help_chat_image(request)
     payload = build_deepseek_help_chat_payload(request)
     payload["stream"] = True
-    response = None
+    url = f"{deepseek_base_url()}/chat/completions"
+    headers = deepseek_help_headers()
 
-    try:
-        response = requests.post(
-            f"{deepseek_base_url()}/chat/completions",
-            headers=deepseek_help_headers(),
-            json=payload,
-            timeout=60,
-            stream=True,
-        )
-        response.raise_for_status()
+    async def generate():
+        response = None
+        try:
+            response = await asyncio.to_thread(
+                requests.post,
+                url,
+                headers=headers,
+                json=payload,
+                timeout=60,
+                stream=True,
+            )
+            response.raise_for_status()
+            line_iterator = response.iter_lines(decode_unicode=False)
 
-        for raw_line in response.iter_lines(decode_unicode=False):
-            line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
-            if not line or not line.startswith("data:"):
-                continue
+            while True:
+                has_line, raw_line = await asyncio.to_thread(
+                    _next_help_chat_stream_line,
+                    line_iterator,
+                )
+                if not has_line:
+                    break
 
-            data = line[5:].strip()
-            if data == "[DONE]":
-                break
+                line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+                if not line or not line.startswith("data:"):
+                    continue
 
-            try:
-                chunk = json.loads(data)
-            except ValueError:
-                continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
 
-            choices = chunk.get("choices") if isinstance(chunk, dict) else None
-            first_choice = choices[0] if isinstance(choices, list) and choices else None
-            delta = first_choice.get("delta") if isinstance(first_choice, dict) else None
-            content = delta.get("content") if isinstance(delta, dict) else None
-            if isinstance(content, str) and content:
-                yield content
-    except requests.RequestException:
-        yield "DeepSeek 帮助助手暂时无法连接，请稍后重试。"
-    finally:
-        if response is not None:
-            response.close()
+                try:
+                    chunk = json.loads(data)
+                except ValueError:
+                    continue
+
+                choices = chunk.get("choices") if isinstance(chunk, dict) else None
+                first_choice = choices[0] if isinstance(choices, list) and choices else None
+                delta = first_choice.get("delta") if isinstance(first_choice, dict) else None
+                content = delta.get("content") if isinstance(delta, dict) else None
+                if isinstance(content, str) and content:
+                    yield content
+        except requests.RequestException:
+            yield "DeepSeek 帮助助手暂时无法连接，请稍后重试。"
+        finally:
+            if response is not None:
+                response.close()
+
+    return generate()
 
 
 def call_help_chat(request: HelpChatRequest) -> str:
