@@ -15,8 +15,8 @@
     "dev:admin": "npm --workspace @3dagent/admin run dev",
     "dev:api": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$ErrorActionPreference='Stop'; $port = 8016; $connections = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue; foreach ($c in $connections) { if ($c.OwningProcess) { Stop-Process -Id $c.OwningProcess -Force -ErrorAction SilentlyContinue } }; Set-Location apps/api; if (Test-Path ../../.venv/Scripts/uvicorn.exe) { ../../.venv/Scripts/uvicorn.exe main:app --reload --reload-exclude=generated/* --port $port } else { python -m uvicorn main:app --reload --reload-exclude=generated/* --port $port }\"",
     "lint": "npm --workspace @3dagent/web run lint && npm --workspace @3dagent/admin run lint",
-    "build": "npm --workspace @3dagent/web run build && npm --workspace @3dagent/admin run build",
-    "build:web": "npm --workspace @3dagent/web run build",
+    "build": "npm run build:web && npm run build:admin",
+    "build:web": "npm --workspace @3dagent/web run build && npm run prepare:web-standalone",
     "prepare:web-standalone": "node scripts/prepare-web-standalone.mjs",
     "build:admin": "npm --workspace @3dagent/admin run build"
   },
