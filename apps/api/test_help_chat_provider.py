@@ -63,6 +63,9 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
             ],
             selectedTool="writePrompt",
         )
+        response = response_mock(
+            {"choices": [{"message": {"content": "  DeepSeek answer  "}}]}
+        )
 
         with (
             patch.object(api, "help_chat_model", return_value="deepseek-v4-pro"),
@@ -78,9 +81,7 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
             patch.object(
                 api.requests,
                 "post",
-                return_value=response_mock(
-                    {"choices": [{"message": {"content": "  DeepSeek answer  "}}]}
-                ),
+                return_value=response,
             ) as post,
         ):
             result = api.call_deepseek_help_chat(request)
@@ -123,6 +124,8 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
             },
         )
         self.assertNotIn("stream", post.call_args.kwargs)
+        response.raise_for_status.assert_called_once_with()
+        response.close.assert_called_once_with()
 
     def test_deepseek_help_headers_requires_dedicated_key(self):
         api = load_api()
@@ -138,6 +141,7 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
                 api.deepseek_help_headers()
 
         self.assertEqual(raised.exception.status_code, 503)
+        self.assertRegex(raised.exception.detail, "[\\u4e00-\\u9fff]")
         self.assertNotIn("cadam-secret", raised.exception.detail)
 
     def test_call_deepseek_help_chat_maps_malformed_response_to_502(self):
@@ -146,16 +150,19 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
             messages=[{"role": "user", "content": "Help"}],
         )
         malformed = {"choices": [{"message": {"content": []}}]}
+        response = response_mock(malformed)
 
         with (
             patch.object(api, "deepseek_help_headers", return_value={}),
-            patch.object(api.requests, "post", return_value=response_mock(malformed)),
+            patch.object(api.requests, "post", return_value=response),
         ):
             with self.assertRaises(HTTPException) as raised:
                 api.call_deepseek_help_chat(request)
 
         self.assertEqual(raised.exception.status_code, 502)
+        self.assertRegex(raised.exception.detail, "[\\u4e00-\\u9fff]")
         self.assertNotIn(str(malformed), raised.exception.detail)
+        response.close.assert_called_once_with()
 
     def test_call_deepseek_help_chat_maps_timeout_to_sanitized_503(self):
         api = load_api()
@@ -181,6 +188,7 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
                 api.call_deepseek_help_chat(request)
 
         self.assertEqual(raised.exception.status_code, 503)
+        self.assertRegex(raised.exception.detail, "[\\u4e00-\\u9fff]")
         self.assertNotIn(api_key, raised.exception.detail)
         self.assertNotIn(upstream_body, raised.exception.detail)
         self.assertNotIn(api_key, str(raised.exception))
@@ -193,6 +201,12 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
         )
         api_key = "test-deepseek-key"
         upstream_body = "upstream rate-limit body"
+        response = response_mock(
+            {"choices": [{"message": {"content": "must not return"}}]}
+        )
+        response.raise_for_status.side_effect = api.requests.HTTPError(
+            f"{upstream_body} {api_key}"
+        )
 
         with (
             patch.object(
@@ -203,15 +217,18 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
             patch.object(
                 api.requests,
                 "post",
-                return_value=response_mock({"error": upstream_body}, status_code=429),
+                return_value=response,
             ),
         ):
             with self.assertRaises(HTTPException) as raised:
                 api.call_deepseek_help_chat(request)
 
         self.assertEqual(raised.exception.status_code, 502)
+        self.assertRegex(raised.exception.detail, "[\\u4e00-\\u9fff]")
         self.assertNotIn(api_key, raised.exception.detail)
         self.assertNotIn(upstream_body, raised.exception.detail)
+        response.raise_for_status.assert_called_once_with()
+        response.close.assert_called_once_with()
 
     def test_call_deepseek_help_chat_maps_invalid_json_to_sanitized_502(self):
         api = load_api()
@@ -236,8 +253,10 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
                 api.call_deepseek_help_chat(request)
 
         self.assertEqual(raised.exception.status_code, 502)
+        self.assertRegex(raised.exception.detail, "[\\u4e00-\\u9fff]")
         self.assertNotIn(api_key, raised.exception.detail)
         self.assertNotIn(upstream_body, raised.exception.detail)
+        response.close.assert_called_once_with()
 
     def test_call_deepseek_help_chat_maps_empty_choices_to_sanitized_502(self):
         api = load_api()
@@ -261,8 +280,10 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
                 api.call_deepseek_help_chat(request)
 
         self.assertEqual(raised.exception.status_code, 502)
+        self.assertRegex(raised.exception.detail, "[\\u4e00-\\u9fff]")
         self.assertNotIn(api_key, raised.exception.detail)
         self.assertNotIn(upstream_body, raised.exception.detail)
+        response.close.assert_called_once_with()
 
     def test_stream_deepseek_help_chat_parses_data_events_and_closes_response(self):
         api = load_api()
@@ -462,6 +483,40 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
 
         self.assertEqual(result, "vision reply")
         mimo.assert_called_once_with(image_request)
+
+        with (
+            patch.object(api, "help_chat_provider", return_value="mimo"),
+            patch.object(
+                api,
+                "stream_mimo_help_chat",
+                return_value=iter(["vision chunk"]),
+            ) as mimo_stream,
+        ):
+            chunks = list(api.stream_help_chat(image_request))
+
+        self.assertEqual(chunks, ["vision chunk"])
+        mimo_stream.assert_called_once_with(image_request)
+
+    def test_deepseek_image_data_url_without_flag_is_rejected_before_network(self):
+        api = load_api()
+        image_request = api.HelpChatRequest(
+            messages=[{"role": "user", "content": "看图回答"}],
+            imageDataUrl="data:image/png;base64,aGVscA==",
+        )
+
+        with (
+            patch.object(api, "help_chat_provider", return_value="deepseek"),
+            patch.object(api.requests, "post") as post,
+        ):
+            with self.assertRaises(HTTPException) as call_raised:
+                api.call_help_chat(image_request)
+            with self.assertRaises(HTTPException) as stream_raised:
+                api.stream_help_chat(image_request)
+
+        for raised in (call_raised, stream_raised):
+            self.assertEqual(raised.exception.status_code, 400)
+            self.assertIn("图片", raised.exception.detail)
+        post.assert_not_called()
 
 
 if __name__ == "__main__":
