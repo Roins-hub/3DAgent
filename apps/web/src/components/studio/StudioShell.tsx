@@ -114,7 +114,7 @@ export function StudioShell() {
     activeJob?.status === "completed" && activeJob.modelUrl
       ? activeJob.modelUrl === "/models/demo-asset.glb"
         ? activeJob.modelUrl
-        : api.modelUrl(activeJob.id, activeJob.targetFormat)
+        : `${api.modelUrl(activeJob.id, activeJob.targetFormat)}&v=${encodeURIComponent(activeJob.updatedAt)}`
       : null;
   const selectedExportOption =
     exportFormatOptions.find((option) => option.value === exportFormat) ??

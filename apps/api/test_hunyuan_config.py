@@ -195,6 +195,23 @@ class HunyuanConfigTests(unittest.TestCase):
             "https://example.test/model.glb",
         )
 
+    def test_hunyuan_model_url_prefers_glb_from_tencent_results(self):
+        with test_env():
+            api = load_api()
+
+        self.assertEqual(
+            api.model_url_from_hunyuan(
+                {
+                    "Status": "DONE",
+                    "ResultFile3Ds": [
+                        {"Type": "OBJ", "Url": "https://example.test/model.zip"},
+                        {"Type": "GLB", "Url": "https://example.test/model.glb"},
+                    ],
+                }
+            ),
+            "https://example.test/model.glb",
+        )
+
 
 class ImageProviderTests(unittest.TestCase):
     def test_image_provider_defaults_to_openai_image2(self):

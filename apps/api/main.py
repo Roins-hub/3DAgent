@@ -3246,9 +3246,17 @@ def model_url_from_hunyuan(task: dict[str, Any]) -> str | None:
 
     files = task.get("ResultFile3Ds") or []
     if isinstance(files, list):
+        fallback_url = None
         for item in files:
-            if isinstance(item, dict) and item.get("Url"):
-                return str(item["Url"])
+            if not isinstance(item, dict) or not item.get("Url"):
+                continue
+            url = str(item["Url"])
+            if str(item.get("Type", "")).lower() == "glb":
+                return url
+            if fallback_url is None:
+                fallback_url = url
+        if fallback_url:
+            return fallback_url
     return task.get("ResultUrl") or task.get("Url")
 
 
