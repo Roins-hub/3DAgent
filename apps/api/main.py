@@ -955,7 +955,16 @@ def build_deepseek_help_chat_payload(request: HelpChatRequest) -> dict[str, Any]
     }
 
 
+def reject_deepseek_help_chat_image(request: HelpChatRequest) -> None:
+    if request.hasImage or (request.imageDataUrl and request.imageDataUrl.strip()):
+        raise HTTPException(
+            status_code=400,
+            detail="DeepSeek 帮助助手暂不支持图片，请改用文字描述。",
+        )
+
+
 def call_deepseek_help_chat(request: HelpChatRequest) -> str:
+    reject_deepseek_help_chat_image(request)
     try:
         response = requests.post(
             f"{deepseek_base_url()}/chat/completions",
@@ -1890,6 +1899,68 @@ def stream_mimo_help_chat(request: HelpChatRequest):
                 yield delta
     finally:
         response.close()
+
+
+def stream_deepseek_help_chat(request: HelpChatRequest):
+    reject_deepseek_help_chat_image(request)
+    payload = build_deepseek_help_chat_payload(request)
+    payload["stream"] = True
+    response = None
+
+    try:
+        response = requests.post(
+            f"{deepseek_base_url()}/chat/completions",
+            headers=deepseek_help_headers(),
+            json=payload,
+            timeout=60,
+            stream=True,
+        )
+        response.raise_for_status()
+
+        for raw_line in response.iter_lines(decode_unicode=False):
+            line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+            if not line or not line.startswith("data:"):
+                continue
+
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+
+            try:
+                chunk = json.loads(data)
+            except ValueError:
+                continue
+
+            choices = chunk.get("choices") if isinstance(chunk, dict) else None
+            first_choice = choices[0] if isinstance(choices, list) and choices else None
+            delta = first_choice.get("delta") if isinstance(first_choice, dict) else None
+            content = delta.get("content") if isinstance(delta, dict) else None
+            if isinstance(content, str) and content:
+                yield content
+    except requests.RequestException:
+        yield "DeepSeek 帮助助手暂时无法连接，请稍后重试。"
+    finally:
+        if response is not None:
+            response.close()
+
+
+def call_help_chat(request: HelpChatRequest) -> str:
+    provider = help_chat_provider()
+    if provider == "deepseek":
+        return call_deepseek_help_chat(request)
+    if provider == "mimo":
+        return call_mimo_help_chat(request)
+    raise HTTPException(status_code=503, detail="帮助助手服务配置无效，请联系管理员。")
+
+
+def stream_help_chat(request: HelpChatRequest):
+    provider = help_chat_provider()
+    if provider == "deepseek":
+        reject_deepseek_help_chat_image(request)
+        return stream_deepseek_help_chat(request)
+    if provider == "mimo":
+        return stream_mimo_help_chat(request)
+    return iter(["帮助助手服务配置无效，请联系管理员。"])
 
 
 def supabase_auth_config() -> tuple[str, str]:
@@ -4261,7 +4332,7 @@ async def help_chat(request: HelpChatRequest) -> HelpChatResponse:
     if not request.messages:
         raise HTTPException(status_code=400, detail="Message is required.")
 
-    message = await asyncio.to_thread(call_mimo_help_chat, request)
+    message = await asyncio.to_thread(call_help_chat, request)
     return HelpChatResponse(message=message)
 
 
@@ -4271,7 +4342,7 @@ async def help_chat_stream(request: HelpChatRequest):
         raise HTTPException(status_code=400, detail="Message is required.")
 
     return StreamingResponse(
-        stream_mimo_help_chat(request),
+        stream_help_chat(request),
         media_type="text/plain; charset=utf-8",
         headers={
             "Cache-Control": "no-cache",

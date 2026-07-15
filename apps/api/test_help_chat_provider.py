@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import unittest
 from unittest.mock import Mock, patch
@@ -61,8 +62,6 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
                 ],
             ],
             selectedTool="writePrompt",
-            hasImage=True,
-            imageDataUrl="data:image/png;base64,ignored",
         )
 
         with (
@@ -264,6 +263,205 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 502)
         self.assertNotIn(api_key, raised.exception.detail)
         self.assertNotIn(upstream_body, raised.exception.detail)
+
+    def test_stream_deepseek_help_chat_parses_data_events_and_closes_response(self):
+        api = load_api()
+        request = api.HelpChatRequest(
+            messages=[{"role": "user", "content": "CAD 参数怎么填？"}],
+        )
+        response = Mock()
+        response.iter_lines.return_value = iter(
+            [
+                b"",
+                b"event: message",
+                b'data: {"choices":[{"delta":{"content":"CAD"}}]}',
+                b"id: ignored",
+                b'data: {"choices":[{"delta":{"content":""}}]}',
+                b'data: {"choices":[{"delta":{"content":" \xe5\x8a\xa9\xe6\x89\x8b"}}]}',
+                b"data: [DONE]",
+                b'data: {"choices":[{"delta":{"content":"ignored"}}]}',
+            ]
+        )
+
+        with (
+            patch.object(api, "deepseek_base_url", return_value="https://api.deepseek.test"),
+            patch.object(
+                api,
+                "deepseek_help_headers",
+                return_value={"Authorization": "Bearer help-key"},
+            ),
+            patch.object(api.requests, "post", return_value=response) as post,
+        ):
+            chunks = list(api.stream_deepseek_help_chat(request))
+
+        self.assertEqual(chunks, ["CAD", " 助手"])
+        post.assert_called_once()
+        self.assertEqual(
+            post.call_args.args[0],
+            "https://api.deepseek.test/chat/completions",
+        )
+        self.assertTrue(post.call_args.kwargs["stream"])
+        self.assertTrue(post.call_args.kwargs["json"]["stream"])
+        response.close.assert_called_once_with()
+
+    def test_stream_deepseek_help_chat_closes_http_error_and_sanitizes_output(self):
+        api = load_api()
+        request = api.HelpChatRequest(
+            messages=[{"role": "user", "content": "Help"}],
+        )
+        api_key = "test-deepseek-key"
+        upstream_body = "upstream rate-limit body"
+        response = Mock()
+        response.raise_for_status.side_effect = api.requests.HTTPError(
+            f"{upstream_body} {api_key}"
+        )
+
+        with (
+            patch.object(
+                api,
+                "deepseek_help_headers",
+                return_value={"Authorization": f"Bearer {api_key}"},
+            ),
+            patch.object(api.requests, "post", return_value=response),
+        ):
+            chunks = list(api.stream_deepseek_help_chat(request))
+
+        output = "".join(chunks)
+        self.assertIn("DeepSeek", output)
+        self.assertNotIn(api_key, output)
+        self.assertNotIn(upstream_body, output)
+        response.close.assert_called_once_with()
+
+    def test_stream_deepseek_help_chat_sanitizes_connection_error(self):
+        api = load_api()
+        request = api.HelpChatRequest(
+            messages=[{"role": "user", "content": "Help"}],
+        )
+        api_key = "test-deepseek-key"
+        upstream_body = "upstream connection body"
+
+        with (
+            patch.object(
+                api,
+                "deepseek_help_headers",
+                return_value={"Authorization": f"Bearer {api_key}"},
+            ),
+            patch.object(
+                api.requests,
+                "post",
+                side_effect=api.requests.ConnectionError(f"{upstream_body} {api_key}"),
+            ),
+        ):
+            output = "".join(api.stream_deepseek_help_chat(request))
+
+        self.assertIn("DeepSeek", output)
+        self.assertNotIn(api_key, output)
+        self.assertNotIn(upstream_body, output)
+
+    def test_call_help_chat_dispatches_supported_providers_and_rejects_unknown(self):
+        api = load_api()
+        request = api.HelpChatRequest(
+            messages=[{"role": "user", "content": "Help"}],
+        )
+
+        for provider, adapter_name in (
+            ("deepseek", "call_deepseek_help_chat"),
+            ("mimo", "call_mimo_help_chat"),
+        ):
+            with self.subTest(provider=provider):
+                with (
+                    patch.object(api, "help_chat_provider", return_value=provider),
+                    patch.object(api, adapter_name, return_value=f"{provider}-reply") as adapter,
+                ):
+                    result = api.call_help_chat(request)
+
+                self.assertEqual(result, f"{provider}-reply")
+                adapter.assert_called_once_with(request)
+
+        with patch.object(api, "help_chat_provider", return_value="unknown"):
+            with self.assertRaises(HTTPException) as raised:
+                api.call_help_chat(request)
+
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertRegex(raised.exception.detail, "[\\u4e00-\\u9fff]")
+
+    def test_stream_help_chat_dispatches_supported_providers_and_handles_unknown(self):
+        api = load_api()
+        request = api.HelpChatRequest(
+            messages=[{"role": "user", "content": "Help"}],
+        )
+
+        for provider, adapter_name in (
+            ("deepseek", "stream_deepseek_help_chat"),
+            ("mimo", "stream_mimo_help_chat"),
+        ):
+            with self.subTest(provider=provider):
+                with (
+                    patch.object(api, "help_chat_provider", return_value=provider),
+                    patch.object(api, adapter_name, return_value=iter([provider])) as adapter,
+                ):
+                    chunks = list(api.stream_help_chat(request))
+
+                self.assertEqual(chunks, [provider])
+                adapter.assert_called_once_with(request)
+
+        with patch.object(api, "help_chat_provider", return_value="unknown"):
+            chunks = list(api.stream_help_chat(request))
+
+        self.assertEqual(len(chunks), 1)
+        self.assertRegex(chunks[0], "[\\u4e00-\\u9fff]")
+
+    def test_help_chat_endpoints_use_provider_neutral_wrappers(self):
+        api = load_api()
+        request = api.HelpChatRequest(
+            messages=[{"role": "user", "content": "Help"}],
+        )
+
+        with patch.object(api, "call_help_chat", return_value="neutral reply") as call:
+            response = asyncio.run(api.help_chat(request))
+
+        self.assertEqual(response.message, "neutral reply")
+        call.assert_called_once_with(request)
+
+        with patch.object(api, "stream_help_chat", return_value=iter(["neutral chunk"])) as stream:
+            response = asyncio.run(api.help_chat_stream(request))
+
+        self.assertEqual(response.media_type, "text/plain; charset=utf-8")
+        stream.assert_called_once_with(request)
+
+    def test_deepseek_images_are_rejected_before_network_but_mimo_is_preserved(self):
+        api = load_api()
+        image_request = api.HelpChatRequest(
+            messages=[{"role": "user", "content": "看图回答"}],
+            hasImage=True,
+            imageDataUrl="data:image/png;base64,aGVscA==",
+        )
+
+        with (
+            patch.object(api, "help_chat_provider", return_value="deepseek"),
+            patch.object(api.requests, "post") as post,
+        ):
+            with self.assertRaises(HTTPException) as call_raised:
+                api.call_help_chat(image_request)
+            with self.assertRaises(HTTPException) as stream_raised:
+                list(api.stream_help_chat(image_request))
+            with self.assertRaises(HTTPException) as endpoint_raised:
+                asyncio.run(api.help_chat_stream(image_request))
+
+        for raised in (call_raised, stream_raised, endpoint_raised):
+            self.assertEqual(raised.exception.status_code, 400)
+            self.assertIn("DeepSeek", raised.exception.detail)
+            self.assertIn("图片", raised.exception.detail)
+        post.assert_not_called()
+
+        with (
+            patch.object(api, "help_chat_provider", return_value="mimo"),
+            patch.object(api, "call_mimo_help_chat", return_value="vision reply") as mimo,
+        ):
+            result = api.call_help_chat(image_request)
+
+        self.assertEqual(result, "vision reply")
+        mimo.assert_called_once_with(image_request)
 
 
 if __name__ == "__main__":
