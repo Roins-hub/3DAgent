@@ -935,7 +935,11 @@ def deepseek_help_headers() -> dict[str, str]:
 
 
 def build_deepseek_help_chat_payload(request: HelpChatRequest) -> dict[str, Any]:
-    messages = [{"role": "system", "content": help_system_prompt()}]
+    tool_hint = ""
+    if request.selectedTool:
+        tool_hint = f"\n用户当前选择的输入工具是：{request.selectedTool}。"
+
+    messages = [{"role": "system", "content": help_system_prompt() + tool_hint}]
     messages.extend(
         {"role": message.role, "content": content}
         for message in request.messages[-16:]

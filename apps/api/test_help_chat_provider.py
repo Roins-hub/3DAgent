@@ -102,7 +102,13 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
             {
                 "model": "deepseek-v4-pro",
                 "messages": [
-                    {"role": "system", "content": api.help_system_prompt()},
+                    {
+                        "role": "system",
+                        "content": (
+                            api.help_system_prompt()
+                            + "\n用户当前选择的输入工具是：writePrompt。"
+                        ),
+                    },
                     *[
                         {
                             "role": "assistant" if index % 2 else "user",
@@ -151,6 +157,113 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status_code, 502)
         self.assertNotIn(str(malformed), raised.exception.detail)
+
+    def test_call_deepseek_help_chat_maps_timeout_to_sanitized_503(self):
+        api = load_api()
+        request = api.HelpChatRequest(
+            messages=[{"role": "user", "content": "Help"}],
+        )
+        api_key = "test-deepseek-key"
+        upstream_body = "upstream timeout body"
+
+        with (
+            patch.object(
+                api,
+                "deepseek_help_headers",
+                return_value={"Authorization": f"Bearer {api_key}"},
+            ),
+            patch.object(
+                api.requests,
+                "post",
+                side_effect=api.requests.Timeout(f"{upstream_body} {api_key}"),
+            ),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                api.call_deepseek_help_chat(request)
+
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertNotIn(api_key, raised.exception.detail)
+        self.assertNotIn(upstream_body, raised.exception.detail)
+        self.assertNotIn(api_key, str(raised.exception))
+        self.assertNotIn(upstream_body, str(raised.exception))
+
+    def test_call_deepseek_help_chat_maps_http_error_to_sanitized_502(self):
+        api = load_api()
+        request = api.HelpChatRequest(
+            messages=[{"role": "user", "content": "Help"}],
+        )
+        api_key = "test-deepseek-key"
+        upstream_body = "upstream rate-limit body"
+
+        with (
+            patch.object(
+                api,
+                "deepseek_help_headers",
+                return_value={"Authorization": f"Bearer {api_key}"},
+            ),
+            patch.object(
+                api.requests,
+                "post",
+                return_value=response_mock({"error": upstream_body}, status_code=429),
+            ),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                api.call_deepseek_help_chat(request)
+
+        self.assertEqual(raised.exception.status_code, 502)
+        self.assertNotIn(api_key, raised.exception.detail)
+        self.assertNotIn(upstream_body, raised.exception.detail)
+
+    def test_call_deepseek_help_chat_maps_invalid_json_to_sanitized_502(self):
+        api = load_api()
+        request = api.HelpChatRequest(
+            messages=[{"role": "user", "content": "Help"}],
+        )
+        api_key = "test-deepseek-key"
+        upstream_body = "not-json upstream body"
+        response = response_mock(None)
+        response.text = upstream_body
+        response.json.side_effect = ValueError(upstream_body)
+
+        with (
+            patch.object(
+                api,
+                "deepseek_help_headers",
+                return_value={"Authorization": f"Bearer {api_key}"},
+            ),
+            patch.object(api.requests, "post", return_value=response),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                api.call_deepseek_help_chat(request)
+
+        self.assertEqual(raised.exception.status_code, 502)
+        self.assertNotIn(api_key, raised.exception.detail)
+        self.assertNotIn(upstream_body, raised.exception.detail)
+
+    def test_call_deepseek_help_chat_maps_empty_choices_to_sanitized_502(self):
+        api = load_api()
+        request = api.HelpChatRequest(
+            messages=[{"role": "user", "content": "Help"}],
+        )
+        api_key = "test-deepseek-key"
+        upstream_body = "empty choices upstream body"
+        response = response_mock({"choices": []})
+        response.text = upstream_body
+
+        with (
+            patch.object(
+                api,
+                "deepseek_help_headers",
+                return_value={"Authorization": f"Bearer {api_key}"},
+            ),
+            patch.object(api.requests, "post", return_value=response),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                api.call_deepseek_help_chat(request)
+
+        self.assertEqual(raised.exception.status_code, 502)
+        self.assertNotIn(api_key, raised.exception.detail)
+        self.assertNotIn(upstream_body, raised.exception.detail)
 
 
 if __name__ == "__main__":
