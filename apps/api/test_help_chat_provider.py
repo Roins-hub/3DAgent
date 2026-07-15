@@ -85,6 +85,39 @@ async def collect_async_stream(stream):
 
 
 class DeepSeekHelpChatProviderTests(unittest.TestCase):
+    def test_admin_settings_expose_safe_help_chat_config_and_redact_secret(self):
+        api = load_api()
+
+        self.assertTrue(
+            {
+                "HELP_CHAT_PROVIDER",
+                "HELP_CHAT_MODEL",
+                "DEEPSEEK_BASE_URL",
+            }.issubset(api.ADMIN_VISIBLE_SETTING_KEYS)
+        )
+        self.assertTrue(
+            {
+                "HELP_CHAT_PROVIDER",
+                "HELP_CHAT_MODEL",
+                "DEEPSEEK_BASE_URL",
+            }.isdisjoint(api.ADMIN_SECRET_KEYS)
+        )
+        self.assertIn("DEEPSEEK_API_KEY", api.ADMIN_SECRET_KEYS)
+
+        secret = api.admin_setting_view(
+            {
+                "key": "DEEPSEEK_API_KEY",
+                "value": "deepseek-test-secret",
+                "is_secret": False,
+                "updated_at": None,
+            }
+        )
+
+        self.assertTrue(secret.isSecret)
+        self.assertTrue(secret.isConfigured)
+        serialized = api.AdminSettingsResponse(settings=[secret]).model_dump(mode="json")
+        self.assertIsNone(serialized["settings"][0]["value"])
+
     def test_dedicated_help_chat_settings_and_key_are_used(self):
         api = load_api()
         settings = {

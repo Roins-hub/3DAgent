@@ -23,7 +23,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_serializer
 import requests
 
 GenerationMode = Literal["text-to-3d", "image-to-3d"]
@@ -75,6 +75,9 @@ ADMIN_SECRET_KEYS = {
 ADMIN_VISIBLE_SETTING_KEYS = [
     "MODEL_PROVIDER",
     "IMAGE_PROVIDER",
+    "HELP_CHAT_PROVIDER",
+    "HELP_CHAT_MODEL",
+    "DEEPSEEK_BASE_URL",
     "CADAM_LLM_PROVIDER",
     "PARAMCAD_ENGINE",
     "CAD_SCRIPT_SOURCE_ONLY",
@@ -226,6 +229,13 @@ class AdminSettingView(BaseModel):
     isSecret: bool = False
     isConfigured: bool = False
     updatedAt: str | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_setting(self, handler):
+        data = handler(self)
+        if self.isSecret:
+            data["value"] = None
+        return data
 
 
 class AdminSettingsUpdate(BaseModel):
@@ -2699,10 +2709,11 @@ def admin_user_from_payload(payload: dict[str, Any]) -> AdminUser:
 
 
 def admin_setting_view(row: dict[str, Any]) -> AdminSettingView:
-    is_secret = bool(row.get("is_secret"))
+    key = str(row.get("key") or "")
+    is_secret = bool(row.get("is_secret")) or key in ADMIN_SECRET_KEYS
     value = row.get("value")
     return AdminSettingView(
-        key=str(row.get("key") or ""),
+        key=key,
         value=value if isinstance(value, str) else None,
         isSecret=is_secret,
         isConfigured=bool(value),
