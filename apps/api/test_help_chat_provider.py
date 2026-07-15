@@ -700,7 +700,11 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
             ),
             patch.object(api.requests, "post", return_value=response),
         ):
-            output = "".join(api.stream_mimo_help_chat(request))
+            output = "".join(
+                asyncio.run(
+                    collect_async_stream(api.stream_mimo_help_chat(request))
+                )
+            )
 
         self.assertRegex(output, "[\\u4e00-\\u9fff]")
         self.assertNotIn(api_key, output)
@@ -734,7 +738,9 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
             ),
             patch.object(api.requests, "post", return_value=response),
         ):
-            chunks = list(api.stream_mimo_help_chat(request))
+            chunks = asyncio.run(
+                collect_async_stream(api.stream_mimo_help_chat(request))
+            )
 
         output = "".join(chunks)
         self.assertEqual(chunks[0], "first")
@@ -742,6 +748,102 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
         self.assertNotIn(api_key, output)
         self.assertNotIn(upstream_url, output)
         self.assertNotIn(upstream_body, output)
+        response.close.assert_called_once_with()
+
+    def test_help_chat_stream_mimo_disconnect_after_first_chunk_closes_response(self):
+        api = load_api()
+        payload = {"messages": [{"role": "user", "content": "Help"}]}
+        close_event = threading.Event()
+        response = Mock()
+
+        class Lines:
+            def __init__(self):
+                self.index = 0
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                self.index += 1
+                if self.index == 1:
+                    return b'data: {"choices":[{"delta":{"content":"first"}}]}'
+                close_event.wait(timeout=0.5)
+                raise StopIteration
+
+        response.iter_lines.return_value = Lines()
+        response.close.side_effect = close_event.set
+
+        with (
+            patch.object(api, "help_chat_provider", return_value="mimo"),
+            patch.object(api, "mimo_headers", return_value={}),
+            patch.object(api.requests, "post", return_value=response),
+        ):
+            messages, error = asyncio.run(
+                asgi_post(
+                    api,
+                    "/api/help-chat/stream",
+                    payload,
+                    disconnect_after_first_chunk=True,
+                )
+            )
+
+        self.assertIsNone(error)
+        chunks = [
+            message.get("body", b"")
+            for message in messages
+            if message["type"] == "http.response.body" and message.get("body")
+        ]
+        self.assertIn(b"first", chunks)
+        response.close.assert_called_once_with()
+
+    def test_help_chat_stream_mimo_disconnect_closes_late_post_response(self):
+        api = load_api()
+        payload = {"messages": [{"role": "user", "content": "Help"}]}
+        post_started = threading.Event()
+        release_post = threading.Event()
+        close_event = threading.Event()
+        response = Mock()
+        response.close.side_effect = close_event.set
+
+        def blocking_post(*args, **kwargs):
+            post_started.set()
+            release_post.wait(timeout=2)
+            return response
+
+        async def run_scenario():
+            messages, error = await asgi_post(
+                api,
+                "/api/help-chat/stream",
+                payload,
+                disconnect_after_event=post_started,
+            )
+            closed_before_post_returned = close_event.is_set()
+            release_post.set()
+            closed_after_post_returned = await asyncio.to_thread(
+                close_event.wait,
+                1,
+            )
+            return messages, error, closed_before_post_returned, closed_after_post_returned
+
+        with (
+            patch.object(api, "help_chat_provider", return_value="mimo"),
+            patch.object(api, "mimo_headers", return_value={}),
+            patch.object(api.requests, "post", side_effect=blocking_post) as post,
+        ):
+            messages, error, closed_before, closed_after = asyncio.run(run_scenario())
+
+        self.assertIsNone(error)
+        self.assertFalse(closed_before)
+        self.assertTrue(closed_after)
+        self.assertEqual(
+            next(
+                message["status"]
+                for message in messages
+                if message["type"] == "http.response.start"
+            ),
+            200,
+        )
+        post.assert_called_once()
         response.close.assert_called_once_with()
 
     def test_help_chat_stream_provider_lookup_does_not_block_event_loop(self):

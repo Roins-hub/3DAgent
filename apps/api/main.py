@@ -1896,43 +1896,6 @@ def extract_mimo_stream_delta(chunk: dict[str, Any]) -> str:
     return ""
 
 
-def stream_mimo_help_chat(request: HelpChatRequest):
-    payload = build_mimo_help_chat_payload(request)
-    payload["stream"] = True
-    url = f"{mimo_base_url()}/chat/completions"
-    headers = mimo_headers()
-    response = None
-
-    try:
-        response = requests.post(
-            url,
-            headers=headers,
-            json=payload,
-            timeout=60,
-            stream=True,
-        )
-        response.raise_for_status()
-        for raw_line in response.iter_lines(decode_unicode=False):
-            line = raw_line.decode("utf-8")
-            if not line:
-                continue
-            data = line[5:].strip() if line.startswith("data:") else line.strip()
-            if data == "[DONE]":
-                break
-            try:
-                chunk = json.loads(data)
-            except ValueError:
-                continue
-            delta = extract_mimo_stream_delta(chunk)
-            if delta:
-                yield delta
-    except Exception:
-        yield "MiMo 帮助助手暂时无法连接，请稍后重试。"
-    finally:
-        if response is not None:
-            response.close()
-
-
 def _next_help_chat_stream_line(iterator):
     try:
         return True, next(iterator)
@@ -1954,6 +1917,68 @@ def _close_late_help_chat_response(task: asyncio.Task) -> None:
         _HELP_CHAT_POST_CLEANUP_TASKS.discard(task)
 
 
+async def _post_help_chat_stream_response(url: str, headers: dict, payload: dict):
+    post_task = asyncio.create_task(
+        asyncio.to_thread(
+            requests.post,
+            url,
+            headers=headers,
+            json=payload,
+            timeout=60,
+            stream=True,
+        )
+    )
+    try:
+        return await asyncio.shield(post_task)
+    except asyncio.CancelledError:
+        _HELP_CHAT_POST_CLEANUP_TASKS.add(post_task)
+        post_task.add_done_callback(_close_late_help_chat_response)
+        raise
+
+
+def stream_mimo_help_chat(request: HelpChatRequest):
+    payload = build_mimo_help_chat_payload(request)
+    payload["stream"] = True
+    url = f"{mimo_base_url()}/chat/completions"
+    headers = mimo_headers()
+
+    async def generate():
+        response = None
+        try:
+            response = await _post_help_chat_stream_response(url, headers, payload)
+            response.raise_for_status()
+            line_iterator = response.iter_lines(decode_unicode=False)
+
+            while True:
+                has_line, raw_line = await asyncio.to_thread(
+                    _next_help_chat_stream_line,
+                    line_iterator,
+                )
+                if not has_line:
+                    break
+
+                line = raw_line.decode("utf-8")
+                if not line:
+                    continue
+                data = line[5:].strip() if line.startswith("data:") else line.strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                except ValueError:
+                    continue
+                delta = extract_mimo_stream_delta(chunk)
+                if delta:
+                    yield delta
+        except Exception:
+            yield "MiMo 帮助助手暂时无法连接，请稍后重试。"
+        finally:
+            if response is not None:
+                response.close()
+
+    return generate()
+
+
 def stream_deepseek_help_chat(request: HelpChatRequest):
     reject_deepseek_help_chat_image(request)
     payload = build_deepseek_help_chat_payload(request)
@@ -1964,23 +1989,7 @@ def stream_deepseek_help_chat(request: HelpChatRequest):
     async def generate():
         response = None
         try:
-            post_task = asyncio.create_task(
-                asyncio.to_thread(
-                    requests.post,
-                    url,
-                    headers=headers,
-                    json=payload,
-                    timeout=60,
-                    stream=True,
-                )
-            )
-            try:
-                response = await asyncio.shield(post_task)
-            except asyncio.CancelledError:
-                _HELP_CHAT_POST_CLEANUP_TASKS.add(post_task)
-                post_task.add_done_callback(_close_late_help_chat_response)
-                raise
-
+            response = await _post_help_chat_stream_response(url, headers, payload)
             response.raise_for_status()
             line_iterator = response.iter_lines(decode_unicode=False)
 
