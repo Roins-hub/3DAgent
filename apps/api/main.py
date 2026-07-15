@@ -4330,21 +4330,26 @@ async def admin_update_settings(
 ) -> AdminSettingsResponse:
     admin = verify_admin_user(authorization)
     timestamp = now_iso()
-    rows = [
-        {
-            "key": setting.key.strip(),
-            "value": setting.value,
-            "is_secret": setting.isSecret or setting.key.strip() in ADMIN_SECRET_KEYS,
-            "updated_by": admin.id,
-            "updated_at": timestamp,
-        }
-        for setting in request.settings
-        if setting.key.strip()
-        and not (
-            (setting.isSecret or setting.key.strip() in ADMIN_SECRET_KEYS)
-            and not setting.value
+    rows = []
+    for setting in request.settings:
+        key = setting.key.strip()
+        if not key:
+            continue
+        is_secret = setting.isSecret or key in ADMIN_SECRET_KEYS
+        if is_secret and setting.value is None:
+            continue
+        value = setting.value
+        if is_secret and value is not None and not value.strip():
+            value = ""
+        rows.append(
+            {
+                "key": key,
+                "value": value,
+                "is_secret": is_secret,
+                "updated_by": admin.id,
+                "updated_at": timestamp,
+            }
         )
-    ]
     if rows:
         update_local_env_file({row["key"]: row["value"] or "" for row in rows})
         supabase_admin_request(
