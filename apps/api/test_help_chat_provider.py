@@ -679,6 +679,105 @@ class DeepSeekHelpChatProviderTests(unittest.TestCase):
         self.assertNotIn(upstream_body, output)
         response.close.assert_called_once_with()
 
+    def test_stream_mimo_help_chat_closes_http_error_and_sanitizes_output(self):
+        api = load_api()
+        request = api.HelpChatRequest(
+            messages=[{"role": "user", "content": "Help"}],
+        )
+        api_key = "test-mimo-key"
+        upstream_url = "https://api.mimo.test/chat/completions"
+        upstream_body = "upstream rate-limit body"
+        response = Mock()
+        response.raise_for_status.side_effect = api.requests.HTTPError(
+            f"403 for {upstream_url}: {upstream_body} {api_key}"
+        )
+
+        with (
+            patch.object(
+                api,
+                "mimo_headers",
+                return_value={"api-key": api_key},
+            ),
+            patch.object(api.requests, "post", return_value=response),
+        ):
+            output = "".join(api.stream_mimo_help_chat(request))
+
+        self.assertRegex(output, "[\\u4e00-\\u9fff]")
+        self.assertNotIn(api_key, output)
+        self.assertNotIn(upstream_url, output)
+        self.assertNotIn(upstream_body, output)
+        response.close.assert_called_once_with()
+
+    def test_stream_mimo_help_chat_closes_iter_lines_error_and_sanitizes_output(self):
+        api = load_api()
+        request = api.HelpChatRequest(
+            messages=[{"role": "user", "content": "Help"}],
+        )
+        api_key = "test-mimo-key"
+        upstream_url = "https://api.mimo.test/chat/completions"
+        upstream_body = "broken stream body"
+        response = Mock()
+
+        def broken_lines():
+            yield b'data: {"choices":[{"delta":{"content":"first"}}]}'
+            raise api.requests.ConnectionError(
+                f"stream failed for {upstream_url}: {upstream_body} {api_key}"
+            )
+
+        response.iter_lines.return_value = broken_lines()
+
+        with (
+            patch.object(
+                api,
+                "mimo_headers",
+                return_value={"api-key": api_key},
+            ),
+            patch.object(api.requests, "post", return_value=response),
+        ):
+            chunks = list(api.stream_mimo_help_chat(request))
+
+        output = "".join(chunks)
+        self.assertEqual(chunks[0], "first")
+        self.assertRegex(chunks[-1], "[\\u4e00-\\u9fff]")
+        self.assertNotIn(api_key, output)
+        self.assertNotIn(upstream_url, output)
+        self.assertNotIn(upstream_body, output)
+        response.close.assert_called_once_with()
+
+    def test_help_chat_stream_provider_lookup_does_not_block_event_loop(self):
+        api = load_api()
+        request = api.HelpChatRequest(
+            messages=[{"role": "user", "content": "Help"}],
+        )
+        lookup_started = threading.Event()
+        release_lookup = threading.Event()
+        ticker_ran = threading.Event()
+        ticker_seen_during_lookup = []
+
+        def slow_provider_lookup():
+            lookup_started.set()
+            release_lookup.wait(timeout=0.5)
+            ticker_seen_during_lookup.append(ticker_ran.is_set())
+            return "unknown"
+
+        async def run_scenario():
+            async def ticker():
+                await asyncio.to_thread(lookup_started.wait, 0.2)
+                ticker_ran.set()
+                release_lookup.set()
+
+            response, _ = await asyncio.gather(
+                api.help_chat_stream(request),
+                ticker(),
+            )
+            return response
+
+        with patch.object(api, "help_chat_provider", side_effect=slow_provider_lookup):
+            response = asyncio.run(run_scenario())
+
+        self.assertTrue(ticker_seen_during_lookup[0])
+        self.assertEqual(response.media_type, "text/plain; charset=utf-8")
+
     def test_help_chat_stream_missing_key_returns_503_before_response_start(self):
         api = load_api()
         payload = {"messages": [{"role": "user", "content": "Help"}]}

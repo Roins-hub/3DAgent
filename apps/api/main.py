@@ -1899,21 +1899,19 @@ def extract_mimo_stream_delta(chunk: dict[str, Any]) -> str:
 def stream_mimo_help_chat(request: HelpChatRequest):
     payload = build_mimo_help_chat_payload(request)
     payload["stream"] = True
+    url = f"{mimo_base_url()}/chat/completions"
+    headers = mimo_headers()
+    response = None
 
     try:
         response = requests.post(
-            f"{mimo_base_url()}/chat/completions",
-            headers=mimo_headers(),
+            url,
+            headers=headers,
             json=payload,
             timeout=60,
             stream=True,
         )
         response.raise_for_status()
-    except requests.RequestException as exc:
-        yield f"MiMo help chat stream request failed: {exc}"
-        return
-
-    try:
         for raw_line in response.iter_lines(decode_unicode=False):
             line = raw_line.decode("utf-8")
             if not line:
@@ -1928,8 +1926,11 @@ def stream_mimo_help_chat(request: HelpChatRequest):
             delta = extract_mimo_stream_delta(chunk)
             if delta:
                 yield delta
+    except Exception:
+        yield "MiMo 帮助助手暂时无法连接，请稍后重试。"
     finally:
-        response.close()
+        if response is not None:
+            response.close()
 
 
 def _next_help_chat_stream_line(iterator):
@@ -4426,8 +4427,9 @@ async def help_chat_stream(request: HelpChatRequest):
     if not request.messages:
         raise HTTPException(status_code=400, detail="Message is required.")
 
+    stream = await asyncio.to_thread(stream_help_chat, request)
     return StreamingResponse(
-        stream_help_chat(request),
+        stream,
         media_type="text/plain; charset=utf-8",
         headers={
             "Cache-Control": "no-cache",
